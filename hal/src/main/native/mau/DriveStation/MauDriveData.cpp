@@ -58,8 +58,10 @@ void Mau_DriveData::initializeDriveData() {
 
 void Mau_DriveData::updateMatchIdentifyInfo(char *event_name, uint8_t match_type, uint16_t match_number, uint8_t replay_number)
 {
+    if (!event_name) return;
     memLock.lock();
-    strcpy((char *)matchInfo.eventName, event_name);
+    std::strncpy(matchInfo.eventName, event_name, sizeof(matchInfo.eventName) - 1);
+    matchInfo.eventName[sizeof(matchInfo.eventName) - 1] = '\0';
     matchInfo.matchType = (HAL_MatchType)match_type;
     matchInfo.matchNumber = match_number;
     matchInfo.replayNumber = replay_number;
@@ -70,15 +72,16 @@ void Mau_DriveData::updateMatchTimeUnsafe(float currMatchTime) {
 	matchTime = currMatchTime;
 }
 
-void Mau_DriveData::updateMatchGameSpecificMessage(uint8_t msg_len, uint8_t *msg_data)
+void Mau_DriveData::updateMatchGameSpecificMessage(size_t msg_len, const uint8_t *msg_data)
 {
+    if (msg_len && !msg_data) return;
     if (msg_len > sizeof(matchInfo.gameSpecificMessage)) {
     	msg_len = sizeof(matchInfo.gameSpecificMessage);
     }
 
     memLock.lock();
     matchInfo.gameSpecificMessageSize = msg_len;
-    memcpy(matchInfo.gameSpecificMessage, msg_data, msg_len);
+    if (msg_len) memcpy(matchInfo.gameSpecificMessage, msg_data, msg_len);
     unlockAndSignal();
 }
 
@@ -148,6 +151,8 @@ void Mau_DriveData::updateUnlockAndSignal()
 
 void Mau_DriveData::updateJoyAxisUnsafe(int joyNumber, int16_t axisCount, int8_t* axes)
 {
+    if (joyNumber < 0 || joyNumber >= HAL_kMaxJoysticks || axisCount < 0 ||
+        axisCount > HAL_kMaxJoystickAxes || (axisCount && !axes)) return;
     // If change in axis count, reinitialize all axes to 0 before updating
     if (joysticks[joyNumber].joyAxes.count != axisCount) {
         joysticks[joyNumber].joyAxes.count = axisCount;
@@ -169,6 +174,8 @@ void Mau_DriveData::updateJoyAxisUnsafe(int joyNumber, int16_t axisCount, int8_t
 }
 void Mau_DriveData::updateJoyPOVUnsafe(int joyNumber, int povsCount, uint16_t* povs)
 {
+    if (joyNumber < 0 || joyNumber >= HAL_kMaxJoysticks || povsCount < 0 ||
+        povsCount > HAL_kMaxJoystickPOVs || (povsCount && !povs)) return;
     // If change in pov count, reinitialize all povs to 0 before updating
     if (joysticks[joyNumber].joyPOVs.count != povsCount) {
     	joysticks[joyNumber].joyPOVs.count = povsCount;
@@ -178,42 +185,38 @@ void Mau_DriveData::updateJoyPOVUnsafe(int joyNumber, int povsCount, uint16_t* p
     }
     for (int index = 0; index < povsCount; index++) {
         joysticks[joyNumber].joyPOVs.povs[index] = povs[index];
-        index++;
     }
 }
 void Mau_DriveData::updateJoyButtonsUnsafe(int joyNumber, uint8_t buttonCount, uint32_t buttons)
 {
+    if (joyNumber < 0 || joyNumber >= HAL_kMaxJoysticks || buttonCount > 32) return;
     joysticks[joyNumber].joyButtons.count = buttonCount;
     joysticks[joyNumber].joyButtons.buttons = buttons;
 }
 
 void Mau_DriveData::updateJoyDescriptor(int joyNumber, HAL_JoystickDescriptor* desc) {
+    if (joyNumber < 0 || joyNumber >= HAL_kMaxJoysticks || !desc) return;
     memLock.lock();
     joysticks[joyNumber].joyDescriptor = *desc;
+    joysticks[joyNumber].joyDescriptor.name[sizeof(desc->name) - 1] = '\0';
     unlockAndSignal();
 }
 
 void Mau_DriveData::updateJoyOutputs(int32_t joyNumber, int64_t outputs, int32_t leftRumble, int32_t rightRumble) {
-	if (joyNumber < HAL_kMaxJoysticks) {
-		memLock.lock();
-		 Mau_SharedJoystick* joy = &joysticks[joyNumber];
-		 joy->outputs = outputs;
-		 joy->leftRumble = leftRumble;
-		 joy->rightRumble = rightRumble;
-		 memLock.lock();
-		 // TODO:  Signal DriverComms that new joystick output values are available.
-	}
+    if (joyNumber < 0 || joyNumber >= HAL_kMaxJoysticks) return;
+    std::lock_guard<wpi::mutex> lock(memLock);
+    auto& joy = joysticks[joyNumber];
+    joy.outputs = outputs;
+    joy.leftRumble = leftRumble;
+    joy.rightRumble = rightRumble;
+    // TODO: transmit joystick output/rumble tags in the legacy DS protocol.
 }
 
 //// ----- HAL Data: Scribe ----- ////
 
 void Mau_DriveData::scribeMatchInfo(HAL_MatchInfo* info) {
     memLock.lock();
-    std::strcpy((char *)info->eventName, matchInfo.eventName);
-    info->matchType = matchInfo.matchType;
-    info->matchNumber = matchInfo.matchNumber;
-    info->replayNumber = matchInfo.replayNumber;
-    std::strcpy((char *)info->gameSpecificMessage, (char *)matchInfo.gameSpecificMessage);
+    *info = matchInfo;
     memLock.unlock();
 }
 

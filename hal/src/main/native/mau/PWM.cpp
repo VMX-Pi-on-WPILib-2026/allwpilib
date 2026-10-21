@@ -6,6 +6,8 @@
 /*----------------------------------------------------------------------------*/
 
 #include "hal/PWM.h"
+#include <algorithm>
+#include <cmath>
 
 #include "ConstantsInternal.h"
 #include "DigitalInternal.h"
@@ -18,6 +20,46 @@
 #include <VMXResource.h>
 
 using namespace hal;
+
+static inline int32_t GetMaxPositivePwm(DigitalPort* port) {
+  return port->maxPwm;
+}
+
+static inline int32_t GetMinPositivePwm(DigitalPort* port) {
+  if (port->eliminateDeadband) {
+    return port->deadbandMaxPwm;
+  } else {
+    return port->centerPwm + 1;
+  }
+}
+
+static inline int32_t GetCenterPwm(DigitalPort* port) {
+  return port->centerPwm;
+}
+
+static inline int32_t GetMaxNegativePwm(DigitalPort* port) {
+  if (port->eliminateDeadband) {
+    return port->deadbandMinPwm;
+  } else {
+    return port->centerPwm - 1;
+  }
+}
+
+static inline int32_t GetMinNegativePwm(DigitalPort* port) {
+  return port->minPwm;
+}
+
+static inline int32_t GetPositiveScaleFactor(DigitalPort* port) {
+  return GetMaxPositivePwm(port) - GetMinPositivePwm(port);
+}  ///< The scale for positive speeds.
+
+static inline int32_t GetNegativeScaleFactor(DigitalPort* port) {
+  return GetMaxNegativePwm(port) - GetMinNegativePwm(port);
+}  ///< The scale for negative speeds.
+
+static inline int32_t GetFullRangeScaleFactor(DigitalPort* port) {
+  return GetMaxPositivePwm(port) - GetMinNegativePwm(port);
+}  ///< The scale for positions.
 
 extern "C" {
 static void SetPWMConfigMs(HAL_DigitalHandle pwmPortHandle, double max, double deadbandMax, double center,
@@ -266,53 +308,59 @@ void HAL_SetPWMPulseTimeMicroseconds(HAL_DigitalHandle pwmPortHandle, int32_t va
  * @param channel The PWM channel to set.
  * @param value The scaled PWM value to set.
  */
-void HAL_SetPWMSpeed(HAL_DigitalHandle pwmPortHandle, double speed, int32_t* status) {
+void HAL_SetPWMSpeed(HAL_DigitalHandle pwmPortHandle, double speed,
+                     int32_t* status) {
+  // Digital PWM uses the same generator through a DIO handle on VMX-pi.
+  auto type = getHandleType(pwmPortHandle);
+  if (type != HAL_HandleEnum::PWM && type != HAL_HandleEnum::DIO) {
+    *status = HAL_HANDLE_ERROR;
+    return;
+  }
+  auto port = digitalChannelHandles->Get(pwmPortHandle, type);
+  if (port == nullptr) {
+    *status = HAL_HANDLE_ERROR;
+    return;
+  }
+  if (!port->configSet) {
+    *status = INCOMPATIBLE_STATE;
+    return;
+  }
 
-	HAL_HandleEnum handleType = getHandleType(pwmPortHandle);
-	if ((handleType != HAL_HandleEnum::PWM) && (handleType != HAL_HandleEnum::DIO)) {
-		*status = HAL_HANDLE_ERROR;
-		return;
-	}
+  DigitalPort* dPort = port.get();
 
-    auto port = digitalChannelHandles->Get(pwmPortHandle, handleType);
-    if (port == nullptr) {
-        *status = HAL_HANDLE_ERROR;
-        return;
-    }
+  if (std::isfinite(speed)) {
+    speed = std::clamp(speed, -1.0, 1.0);
+  } else {
+    speed = 0.0;
+  }
 
-    if (!port->configSet) {
-        *status = INCOMPATIBLE_STATE;
-        return;
-    }
+  // calculate the desired output pwm value by scaling the speed appropriately
+  int32_t rawValue;
+  if (speed == 0.0) {
+    rawValue = GetCenterPwm(dPort);
+  } else if (speed > 0.0) {
+    rawValue =
+        std::lround(speed * static_cast<double>(GetPositiveScaleFactor(dPort)) +
+                    static_cast<double>(GetMinPositivePwm(dPort)));
+  } else {
+    rawValue =
+        std::lround(speed * static_cast<double>(GetNegativeScaleFactor(dPort)) +
+                    static_cast<double>(GetMaxNegativePwm(dPort)));
+  }
 
-    if (speed < -1.0) {
-        speed = -1.0;
-    } else if (speed > 1.0) {
-        speed = 1.0;
-    }
+  if (!((rawValue >= GetMinNegativePwm(dPort)) &&
+        (rawValue <= GetMaxPositivePwm(dPort))) ||
+      rawValue == kPwmDisabled) {
+    *status = HAL_PWM_SCALE_ERROR;
+    return;
+  }
 
-    int dutyCycle;
-    int minPwm = port->minPwm;
-    int maxPwm = port->maxPwm;
-    if (speed <= -1.0) {
-        dutyCycle = minPwm;
-    } else if (speed == 1) {
-        dutyCycle = maxPwm;
-    } else {
-        speed += 1;
-        double diff = maxPwm - minPwm;
-        dutyCycle = minPwm + (speed * (diff / 2.0));
-    }
-
-	VMXResourcePortIndex portIndex = 0;
-    if (port->vmx_chan_info.capabilities & VMXChannelCapability::PWMGeneratorOutput2) {
-    	portIndex = 1;
-    }
-
-    uint8_t retry_count = 3;
-    do { 
-        mau::vmxIO->PWMGenerator_SetDutyCycle(port->vmx_res_handle, portIndex, dutyCycle, status);
-    } while (mau::RetryWriteOnBoardCommError(status, retry_count));    
+  VMXResourcePortIndex portIndex =
+      (port->vmx_chan_info.capabilities & VMXChannelCapability::PWMGeneratorOutput2) ? 1 : 0;
+  uint8_t retries = 3;
+  do {
+    mau::vmxIO->PWMGenerator_SetDutyCycle(port->vmx_res_handle, portIndex, rawValue, status);
+  } while (mau::RetryWriteOnBoardCommError(status, retries));
 }
 
 /**
@@ -335,6 +383,7 @@ void HAL_SetPWMPosition(HAL_DigitalHandle pwmPortHandle, double pos, int32_t* st
         return;
     }
 
+    if (!std::isfinite(pos)) pos = 0.0;
     if (pos < 0.0) {
         pos = 0.0;
     } else if (pos > 1.0) {
@@ -403,37 +452,36 @@ int32_t HAL_GetPWMPulseTimeMicroseconds(HAL_DigitalHandle pwmPortHandle, int32_t
  * @return The scaled PWM value.
  */
 double HAL_GetPWMSpeed(HAL_DigitalHandle pwmPortHandle, int32_t* status) {
-    auto port = digitalChannelHandles->Get(pwmPortHandle, HAL_HandleEnum::PWM);
-    if (port == nullptr) {
-        *status = HAL_HANDLE_ERROR;
-        return 0;
-    }
-    if (!port->configSet) {
-        *status = INCOMPATIBLE_STATE;
-        return 0;
-    }
+  auto port = digitalChannelHandles->Get(pwmPortHandle, HAL_HandleEnum::PWM);
+  if (port == nullptr) {
+    *status = HAL_HANDLE_ERROR;
+    return 0;
+  }
+  if (!port->configSet) {
+    *status = INCOMPATIBLE_STATE;
+    return 0;
+  }
 
-    int32_t currDutyCycle = HAL_GetPWMPulseTimeMicroseconds(pwmPortHandle, status);
-    if (currDutyCycle == 0) {
-    	return 0.0f;
-    } else {
-        double speed;
-        if (currDutyCycle <= port->minPwm) {
-            speed = -1.0f;
-        } else if (currDutyCycle >= port->maxPwm) {
-            speed = 1.0f;
-        } else {
-        	if ((currDutyCycle >= port->deadbandMinPwm) &&
-        		(currDutyCycle <= port->deadbandMaxPwm)) {
-        		speed = 0.0f;
-        	} else {
-            	double speedPerDutyCycleTick = 2.0 / (port->maxPwm - port->minPwm);
-            	speed = -1.0f + (speedPerDutyCycleTick * (currDutyCycle - port->minPwm));
-        	}
-        }
-
-    	return speed;
-    }
+  int32_t value = HAL_GetPWMPulseTimeMicroseconds(pwmPortHandle, status);
+  if (*status != 0) {
+    return 0;
+  }
+  DigitalPort* dPort = port.get();
+  if (value == kPwmDisabled) {
+    return 0.0;
+  } else if (value > GetMaxPositivePwm(dPort)) {
+    return 1.0;
+  } else if (value < GetMinNegativePwm(dPort)) {
+    return -1.0;
+  } else if (value > GetMinPositivePwm(dPort)) {
+    return static_cast<double>(value - GetMinPositivePwm(dPort)) /
+           static_cast<double>(GetPositiveScaleFactor(dPort));
+  } else if (value < GetMaxNegativePwm(dPort)) {
+    return static_cast<double>(value - GetMaxNegativePwm(dPort)) /
+           static_cast<double>(GetNegativeScaleFactor(dPort));
+  } else {
+    return 0.0;
+  }
 }
 
 /**
@@ -443,39 +491,30 @@ double HAL_GetPWMSpeed(HAL_DigitalHandle pwmPortHandle, int32_t* status) {
  * @return The scaled PWM value.
  */
 double HAL_GetPWMPosition(HAL_DigitalHandle pwmPortHandle, int32_t* status) {
-    auto port = digitalChannelHandles->Get(pwmPortHandle, HAL_HandleEnum::PWM);
-    if (port == nullptr) {
-        *status = HAL_HANDLE_ERROR;
-        return 0;
-    }
-    if (!port->configSet) {
-        *status = INCOMPATIBLE_STATE;
-        return 0;
-    }
-
-    int32_t currDutyCycle = HAL_GetPWMPulseTimeMicroseconds(pwmPortHandle, status);
-    if (currDutyCycle == 0) {
-    	return 0.5f;
-    } else {
-        double speed;
-        if (currDutyCycle <= port->minPwm) {
-            speed = 0.0f;
-        } else if (currDutyCycle >= port->maxPwm) {
-            speed = 1.0f;
-        } else {
-        	if ((currDutyCycle >= port->deadbandMinPwm) &&
-        		(currDutyCycle <= port->deadbandMaxPwm)) {
-        		speed = 0.5f;
-        	} else {
-            	double speedPerDutyCycleTick = 1.0 / (port->maxPwm - port->minPwm);
-            	speed = 0.0f + (speedPerDutyCycleTick * (currDutyCycle - port->minPwm));
-        	}
-        }
-
-    	return speed;
-    }
-
+  auto port = digitalChannelHandles->Get(pwmPortHandle, HAL_HandleEnum::PWM);
+  if (port == nullptr) {
+    *status = HAL_HANDLE_ERROR;
     return 0;
+  }
+  if (!port->configSet) {
+    *status = INCOMPATIBLE_STATE;
+    return 0;
+  }
+
+  int32_t value = HAL_GetPWMPulseTimeMicroseconds(pwmPortHandle, status);
+  if (*status != 0) {
+    return 0;
+  }
+  DigitalPort* dPort = port.get();
+
+  if (value < GetMinNegativePwm(dPort)) {
+    return 0.0;
+  } else if (value > GetMaxPositivePwm(dPort)) {
+    return 1.0;
+  } else {
+    return static_cast<double>(value - GetMinNegativePwm(dPort)) /
+           static_cast<double>(GetFullRangeScaleFactor(dPort));
+  }
 }
 
 void HAL_LatchPWMZero(HAL_DigitalHandle pwmPortHandle, int32_t* status) {

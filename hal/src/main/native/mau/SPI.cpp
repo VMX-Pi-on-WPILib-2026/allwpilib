@@ -11,10 +11,10 @@
 #include "hal/Errors.h"
 
 #include "HALInitializer.h"
+#include "HALInternal.h"
 #include "InterruptsInternal.h"
 #include "MauInternal.h"
 #include <wpi/mutex.h>
-static constexpr int32_t kSpiMaxHandles = 5;
 
 using namespace hal;
 
@@ -28,12 +28,6 @@ static VMXResourceHandle vmx_res_handle = CREATE_VMX_RESOURCE_HANDLE(
 		VMXResourceType::Undefined, INVALID_VMX_RESOURCE_INDEX);
 static SPIConfig spi_cfg(500000 /* Bitrate */);
 static int handle = -1;  // This handle is specified by the user.
-
-static AutoTransmitEngineHandle engine_handle = INVALID_AUTO_TRANSMIT_ENGINE_HANDLE;
-
-static wpi::mutex spiAutoMutex;
-static int32_t spiAutoPort = kSpiMaxHandles;
-static std::atomic_bool spiAutoRunning{false};
 
 static void ReinitializeSPIIfAlreadyAllocated(HAL_SPIPort port, int32_t *status) {
 	if (INVALID_VMX_RESOURCE_HANDLE(vmx_res_handle)) {
@@ -191,7 +185,7 @@ void HAL_SetSPIChipSelectActiveLow(HAL_SPIPort port, int32_t* status) {
 		return;
 	}
 
-	spi_cfg.SetCSActiveLow(false);
+	spi_cfg.SetCSActiveLow(true);
 	ReinitializeSPIIfAlreadyAllocated(port, status);
 
 }
@@ -204,168 +198,34 @@ void HAL_SetSPIHandle(HAL_SPIPort port, int32_t handle_value) {
 	handle = handle_value;
 }
 
-/****************************************************************************
- * SPIAuto:  Automatic SPI transfer engine.
- *
- * A single engine is provided, which:
- *
- * - performs periodic SPI transactions at a specified rate
- * - stores a command buffer, comprised of up to 16 bytes (sent to device),
- *   followed by up to 127 bytes of received data.
- * - can optionally be triggered by a digital input or analog trigger
- * - can optionally be forcibly triggered by software
- * - allows acquiring the most-recently read data
- * - allows getting a count of available databytes
- * - manages a count of number of times a triggered transaction did not occur
- *   because the most-recently read data has not yet been read
- */
-
-/**
- * Initialize automatic SPI transfer engine.
- *
- * Only a single engine is available, and use of it blocks use of all other
- * chip select usage on the same physical SPI port while it is running.
- *
- * @param bufferSize buffer size in bytes
- */
-void HAL_InitSPIAuto(HAL_SPIPort port, int32_t bufferSize, int32_t* status) {
-	mau::vmxIO->AutoTransmit_Allocate(engine_handle, status);
-	spiAutoPort = port;
+// The VMX SDK exposes byte-only auto transfers without the per-transfer
+// timestamps required by the 2026 HAL. Reject the feature at initialization
+// rather than returning packed bytes as timestamped uint32_t samples.
+static void UnsupportedSPIAuto(int32_t* status) {
+    *status = MAU_UNSUPPORTED_FEATURE;
+    hal::SetLastError(status, "VMX-pi SDK does not support WPILib timestamped automatic SPI transfers");
 }
 
-/**
- * Frees the automatic SPI transfer engine.
- */
-void HAL_FreeSPIAuto(HAL_SPIPort port, int32_t* status) {
-	mau::vmxIO->AutoTransmit_Stop(engine_handle, status);
-	mau::vmxIO->AutoTransmit_Deallocate(engine_handle, status);
-	engine_handle = INVALID_AUTO_TRANSMIT_ENGINE_HANDLE;
-	spiAutoPort = kSpiMaxHandles;
-}
-
-/**
- * Start running the automatic SPI transfer engine at a periodic rate.
- *
- * InitAuto() and SetAutoTransmitData() must be called before calling this
- * function.
- *
- * @param period period between transfers, in seconds (us resolution)
- */
-void HAL_StartSPIAutoRate(HAL_SPIPort port, double period, int32_t* status) {
-	uint32_t repeat_every_ms = static_cast<uint32_t>(period * 1000);
-	mau::vmxIO->AutoTransmit_StartPeriodic(engine_handle, vmx_res_handle, repeat_every_ms, status);
-}
-
-/**
- * Start running the automatic SPI transfer engine when a trigger occurs.
- *
- * InitAuto() and SetAutoTransmitData() must be called before calling this
- * function.
- *
- * @param source digital source for the trigger (may be an analog trigger)
- * @param rising trigger on the rising edge
- * @param falling trigger on the falling edge
- */
-void HAL_StartSPIAutoTrigger(HAL_SPIPort port, HAL_Handle digitalSourceHandle, HAL_AnalogTriggerType analogTriggerType,
-                             HAL_Bool triggerRising, HAL_Bool triggerFalling, int32_t* status) {
-	VMXResourceIndex int_res_index;
-	VMXChannelInfo vmx_chan_info;
-	if (GetVMXInterruptResourceIndexForDigitalSourceHandle(digitalSourceHandle, int_res_index, vmx_chan_info, status)) {
-		InterruptConfig::InterruptEdge edge_type;
-		if (triggerRising) {
-			if (triggerFalling) {
-				edge_type = InterruptConfig::InterruptEdge::BOTH;
-			} else {
-				edge_type = InterruptConfig::InterruptEdge::RISING;
-			}
-		} else {
-			edge_type = InterruptConfig::InterruptEdge::FALLING;
-		}
-		mau::vmxIO->AutoTransmit_StartTrigger(engine_handle, vmx_res_handle, vmx_chan_info.index, edge_type, status);
-	}
-}
-
-/**
- * Stop running the automatic SPI transfer engine.
- */
-void HAL_StopSPIAuto(HAL_SPIPort port, int32_t* status) {
-	mau::vmxIO->AutoTransmit_Stop(engine_handle, status);
-}
-
-/**
- * Set the data to be transmitted by the engine.
- *
- * Up to 16 bytes are configurable, and may be followed by up to 127 zero
- * bytes.
- *
- * @param dataToSend data to send (maximum 16 bytes)
- * @param zeroSize number of zeros to send after the data
- */
-void HAL_SetSPIAutoTransmitData(HAL_SPIPort port, const uint8_t* dataToSend, int32_t dataSize, int32_t zeroSize,
-                                int32_t* status) {
-	mau::vmxIO->AutoTransmit_SetData(engine_handle, const_cast<uint8_t *>(dataToSend), dataSize, zeroSize, status);
-}
-
-/**
- * Force the engine to make a single transfer.
- */
-void HAL_ForceSPIAutoRead(HAL_SPIPort port, int32_t* status) {
-	mau::vmxIO->AutoTransmit_Immediate(engine_handle, status);
-}
-
-/**
- * Read data that has been transferred by the automatic SPI transfer engine.
- *
- * Transfers may be made a byte at a time, so it's necessary for the caller
- * to handle cases where an entire transfer has not been completed.
- *
- * Blocks until numToRead bytes have been read or timeout expires.
- * May be called with numToRead=0 to retrieve how many bytes are available.
- *
- * NOTE:  The buffer is a buffer of uint32_t (32-bit ints).  The first int is
- * a timestamp; the remainder of ints store the byte in the lower 8 bits.
- * (This clarification provided by Thad House on 3/7/2019).
- * 
- * TODO:  Update implementation to match this new 32-bit int format.
- *
- * @param buffer buffer where read bytes are stored
- * @param numToRead number of bytes to read
- * @param timeout timeout in seconds (ms resolution)
- * @return Number of bytes remaining to be read
- */
-int32_t HAL_ReadSPIAutoReceivedData(HAL_SPIPort port, uint32_t* buffer,  int32_t numToRead, double timeout,
+void HAL_InitSPIAuto(HAL_SPIPort, int32_t, int32_t* status) { UnsupportedSPIAuto(status); }
+void HAL_FreeSPIAuto(HAL_SPIPort, int32_t*) {}
+void HAL_StartSPIAutoRate(HAL_SPIPort, double, int32_t* status) { UnsupportedSPIAuto(status); }
+void HAL_StartSPIAutoTrigger(HAL_SPIPort, HAL_Handle, HAL_AnalogTriggerType,
+                             HAL_Bool, HAL_Bool, int32_t* status) { UnsupportedSPIAuto(status); }
+void HAL_StopSPIAuto(HAL_SPIPort, int32_t*) {}
+void HAL_SetSPIAutoTransmitData(HAL_SPIPort, const uint8_t*, int32_t, int32_t,
+                                int32_t* status) { UnsupportedSPIAuto(status); }
+void HAL_ForceSPIAutoRead(HAL_SPIPort, int32_t* status) { UnsupportedSPIAuto(status); }
+int32_t HAL_ReadSPIAutoReceivedData(HAL_SPIPort, uint32_t*, int32_t, double,
                                     int32_t* status) {
-	int32_t num_bytes_remaining = 0;
-	uint32_t timeout_ms = static_cast<uint32_t>(timeout * 1000);
-	mau::vmxIO->AutoTransmit_GetData(engine_handle, (uint8_t *)buffer, numToRead, timeout_ms, num_bytes_remaining, status);
-	return num_bytes_remaining;
+    UnsupportedSPIAuto(status);
+    return 0;
 }
-
-/**
- * Get the number of bytes dropped by the automatic SPI transfer engine due
- * to the receive buffer being full.
- *
- * @return Number of bytes dropped
- */
-int32_t HAL_GetSPIAutoDroppedCount(HAL_SPIPort port, int32_t* status) {
-	int32_t num_dropped = 0;
-	mau::vmxIO->AutoTransmit_GetNumDropped(engine_handle, num_dropped, status);
-	return num_dropped;
+int32_t HAL_GetSPIAutoDroppedCount(HAL_SPIPort, int32_t* status) {
+    UnsupportedSPIAuto(status);
+    return 0;
 }
-
-void HAL_ConfigureSPIAutoStall(HAL_SPIPort port, int32_t csToSclkTicks,
-                               int32_t stallTicks, int32_t pow2BytesPerRead,
-                               int32_t* status) {
-  std::scoped_lock lock(spiAutoMutex);
-  // FPGA only has one auto SPI engine
-  if (port != spiAutoPort) {
-    *status = INCOMPATIBLE_STATE;
-    return;
-  }
-
-  std::printf("TODO:  HAL_ConfigureSPIAutoStall() implementation goes here.");
-  // TODO:  Implement this in VMX-pi HAL Library
-}
+void HAL_ConfigureSPIAutoStall(HAL_SPIPort, int32_t, int32_t, int32_t,
+                               int32_t* status) { UnsupportedSPIAuto(status); }
 
 // 2026 replaced HAL_SetSPIOpts() with SPI modes; map them onto the same config.
 void HAL_SetSPIMode(HAL_SPIPort port, HAL_SPIMode mode) {

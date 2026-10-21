@@ -62,3 +62,6 @@
 // Mau error codes are negative values <= MAU_ERRNO_CODE_BASE
 #define MAU_ERRNO_CODE_BASE	MAU_CHANNEL_MAP_ERROR
 
+
+#define MAU_UNSUPPORTED_FEATURE -21017
+#define MAU_UNSUPPORTED_FEATURE_MESSAGE "VMX-pi SDK does not support this feature"

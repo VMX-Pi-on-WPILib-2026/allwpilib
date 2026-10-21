@@ -5,6 +5,12 @@
 #include <wpi/priority_mutex.h>
 #include "ErrorOrPrintMessage.h"
 #include "buddy.h"
+#include "PacketReader.h"
+#include "TcpPacketBuffer.h"
+#include <algorithm>
+#include <array>
+#include <span>
+#include <cstring>
 #include <unistd.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
@@ -434,270 +440,153 @@ int32_t mau::comms::enqueuePrintMessage(char *msg) {
 #define DS_TCP_PROTOCOL_TAG_GAME_SPECIFIC_MSG	   14	// DS->ROBOT; (the message is the entire size of the tag)
 
 void mau::comms::decodeTcpPacket(char* data, int length) {
-	int currTagDataFirstIndex = 0;
-	while (currTagDataFirstIndex < length) {
-		uint16_t currTagDataLen = ntohs(*(uint16_t *)&data[currTagDataFirstIndex]);
-		if (currTagDataLen < 1) {
-			// Invalid Data Length received; this is a sign of an error or truncated packet.
-			return;
-		}
-		currTagDataFirstIndex += sizeof(currTagDataLen);		// Seek beyond the length variable
-		currTagDataLen -= sizeof(uint8_t);						// Exclude size of the tag variable
-		char currTag = data[currTagDataFirstIndex++];			// Read tag value and seek beyond the tag ID
-		switch (currTag) {
-			case DS_TCP_PROTOCOL_TAG_JOYSTICK_DESCRIPTIONS:
-			{
-				int i = currTagDataFirstIndex;
-				while ((i - currTagDataFirstIndex) < currTagDataLen) {
-					uint8_t joyid = data[i++];
-					bool xbox = data[i++] == 1;
-					uint8_t type = data[i++];
-					uint8_t name_length = data[i++];
-					int nb_i = i;
-					i += name_length;
-					uint8_t axis_count = data[i++];
-					//uint8_t axis_types[16];
-					int at_i = i;
-					i += axis_count;
-					uint8_t button_count = data[i++];
-					uint8_t pov_count = data[i++];
-
-					if (type != 255 && axis_count <= HAL_kMaxJoystickAxes) {
-						HAL_JoystickDescriptor desc;
-						desc.buttonCount = button_count;
-						desc.povCount = pov_count;
-						desc.isXbox = xbox;
-						desc.type = type;
-						// Range-protected received joystick name length
-						if (name_length >= static_cast<int>(sizeof(desc.name))) {
-							name_length = sizeof(desc.name) - 1;
-						}
-						memcpy(desc.name, &data[nb_i], name_length);
-						desc.name[name_length] = '\0';
-						// Range-protected received joystick axis count
-						if (axis_count > HAL_kMaxJoystickAxes) {
-							desc.axisCount = HAL_kMaxJoystickAxes;
-						} else {
-							desc.axisCount = axis_count;
-						}
-						for (int x = 0; x < desc.axisCount; x++) {
-							desc.axisTypes[x] = data[at_i + x];
-						}
-						Mau_DriveData::updateJoyDescriptor(joyid, &desc);
-					}
-
-				}
-				break;
-			}
-			case DS_TCP_PROTOCOL_TAG_MATCH_INFO:
-				break;
-			case DS_TCP_PROTOCOL_TAG_NEWER_MATCH_INFO:
-			{
-				char event_name[256];
-				int i = currTagDataFirstIndex;
-				uint8_t event_name_length = data[i++];
-				memcpy(event_name, &data[i], event_name_length);
-				event_name[event_name_length] = '\0';
-				i += event_name_length;
-				uint8_t match_type = data[i]; // enum {None, Practice, Qualification, Elimination, Test}
-				i += sizeof(match_type);
-				uint16_t match_number = ntohs(*(uint16_t *)&data[i]);
-				i += sizeof(match_number);
-				uint8_t replay_number = data[i];
-				Mau_DriveData::updateMatchIdentifyInfo(event_name, match_type, match_number, replay_number);
-				break;
-			}
-			case DS_TCP_PROTOCOL_TAG_GAME_SPECIFIC_MSG:
-			{
-				uint16_t game_specific_msg_size = currTagDataLen;
-				Mau_DriveData::updateMatchGameSpecificMessage(game_specific_msg_size, static_cast<uint8_t *>(static_cast<void *>(&data[currTagDataFirstIndex])));
-				break;
-			}
-			default:
-				break;
-		}
-		currTagDataFirstIndex += currTagDataLen;
-	}
+    if (!data || length <= 0) return;
+    PacketReader packets{{reinterpret_cast<const uint8_t*>(data), static_cast<size_t>(length)}};
+    while (packets.remaining()) {
+        uint16_t size;
+        std::span<const uint8_t> frame;
+        if (!packets.read16(size) || !size || !packets.take(size, frame)) return;
+        PacketReader fields{frame};
+        uint8_t tag;
+        fields.read(tag);
+        switch (tag) {
+            case DS_TCP_PROTOCOL_TAG_JOYSTICK_DESCRIPTIONS:
+                while (fields.remaining()) {
+                    uint8_t joyid, xbox, type, nameLength, axisCount, buttonCount, povCount;
+                    std::span<const uint8_t> name, axes;
+                    if (!fields.read(joyid) || !fields.read(xbox) || !fields.read(type) ||
+                        !fields.read(nameLength) || !fields.take(nameLength, name) ||
+                        !fields.read(axisCount) || !fields.take(axisCount, axes) ||
+                        !fields.read(buttonCount) || !fields.read(povCount)) return;
+                    if (joyid >= HAL_kMaxJoysticks || axisCount > HAL_kMaxJoystickAxes ||
+                        povCount > HAL_kMaxJoystickPOVs || buttonCount > 32) continue;
+                    HAL_JoystickDescriptor desc{};
+                    desc.isXbox = xbox == 1;
+                    desc.type = type;
+                    std::memcpy(desc.name, name.data(), name.size());
+                    desc.axisCount = axisCount;
+                    std::copy(axes.begin(), axes.end(), desc.axisTypes);
+                    desc.buttonCount = buttonCount;
+                    desc.povCount = povCount;
+                    Mau_DriveData::updateJoyDescriptor(joyid, &desc);
+                }
+                break;
+            case DS_TCP_PROTOCOL_TAG_NEWER_MATCH_INFO: {
+                uint8_t nameLength, matchType, replayNumber;
+                uint16_t matchNumber;
+                std::span<const uint8_t> name;
+                if (!fields.read(nameLength) || !fields.take(nameLength, name) ||
+                    !fields.read(matchType) || !fields.read16(matchNumber) ||
+                    !fields.read(replayNumber)) return;
+                char eventName[sizeof(HAL_MatchInfo::eventName)]{};
+                std::memcpy(eventName, name.data(), std::min(name.size(), sizeof(eventName) - 1));
+                Mau_DriveData::updateMatchIdentifyInfo(eventName, matchType, matchNumber, replayNumber);
+                break;
+            }
+            case DS_TCP_PROTOCOL_TAG_GAME_SPECIFIC_MSG: {
+                std::span<const uint8_t> message;
+                fields.take(fields.remaining(), message);
+                Mau_DriveData::updateMatchGameSpecificMessage(message.size(), message.data());
+                break;
+            }
+            default:
+                break;
+        }
+    }
 }
 
-// returns MAU_COMMS_SHUTDOWN_XXX
+// Validate and stage the entire datagram before publishing any control data.
 int mau::comms::decodeUdpPacket(char* data, int length) {
-
-	if (length < DS_UDP_PROTOCOL_HEADER_LENGTH) return MAU_COMMS_SHUTDOWN_NONE;
-
-	// Decode Packet Number
-	sq_1 = data[0];
-    sq_2 = data[1];
-    //uint16_t sequence_number = (static_cast<uint16_t>(sq_1) << 8) + sq_2;
-
-    char version = data[DS_UDP_PROTOCOL_HEADER_INDEX_VERSION];
-
-    if (version == 1) {
-
-        udp_ds_control = data[DS_UDP_PROTOCOL_HEADER_INDEX_CONTROLBYTE];
-        bool test = IS_BIT_SET(udp_ds_control, 0);
-        bool auton = IS_BIT_SET(udp_ds_control, 1);
-        bool enabled = IS_BIT_SET(udp_ds_control, 2);
-        bool fms = IS_BIT_SET(udp_ds_control, 3);
-        bool eStop = IS_BIT_SET(udp_ds_control, 7);
-
-        udp_ds_request = data[DS_UDP_PROTOCOL_HEADER_INDEX_REQUESTBYTE];
-        bool new_version_data_requested = IS_BIT_SET(udp_ds_request, 0);		// Requests that version info be sent
-	if (new_version_data_requested) {
-		version_data_requested = true;
-        }
-        //bool usage_request = IS_BIT_SET(udp_ds_request, 1);
-        bool restart = IS_BIT_SET(udp_ds_request, 2);			// Soft Restart
-        bool reboot = IS_BIT_SET(udp_ds_request, 3);			// Hard Restart
-        //bool progStartRequest = IS_BIT_SET(udp_ds_request, 4);		// Program Start Requested
-
-        int shutdown_code = MAU_COMMS_SHUTDOWN_NONE;
-        if (reboot || restart) {
-        	if (reboot) {
-        		shutdown_code = MAU_COMMS_SHUTDOWN_REBOOT;
-        		printf("NOTICE: Driver Station Requested Reboot.\n");
-#if 0
-        		printf("#DS UDP Seq#:  %d.  Bytes:  %d.  Header Data:  %02X %02X %02X %02X %02X %02X\n", sequence_number, length, data[0], data[1], data[2], data[3], data[4], data[5]);
-#endif
-        	} else {
-        		shutdown_code = MAU_COMMS_SHUTDOWN_RESTART;
-        		printf("NOTICE: Driver Station Requested Code Restart.\n");
-#if 0
-        		printf("#DS UDP Seq#:  %d.  Bytes:  %d.  Header Data:  %02X %02X %02X %02X %02X %02X\n", sequence_number, length, data[0], data[1], data[2], data[3], data[4], data[5]);
-#endif
-        	}
-
-	    setRobotProgramStarted(false);
-
-            return (shutdown_code);
-
-        } else if (eStop) {
-            printf("NOTICE: Driver Station Estop \n");
-#if 0
-    		printf("#DS UDP Seq#:  %d.  Bytes:  %d.  Header Data:  %02X %02X %02X %02X %02X %02X\n", sequence_number, length, data[0], data[1], data[2], data[3], data[4], data[5]);
-#endif
-
-	    setRobotProgramStarted(false); // Is this correct?
-	    setRobotESTOPActive(true);
-
-            return MAU_COMMS_SHUTDOWN_ESTOP;
-
-        }
-        HAL_AllianceStationID alliance = (HAL_AllianceStationID)data[DS_UDP_PROTOCOL_HEADER_INDEX_ALLIANCE_STATION_ID];
-
-        bool ds_attached;
-        if (mau::vmxGetTime() - lastDsUDPUpdateReceivedTimestamp > DS_COMM_TIMEOUT_MICROSECONDS) {
-            // DS Disconnected
-            ds_attached = false;
-        } else {
-            // DS Connected
-            ds_attached = true;
-        }
-
-	// Before updating any drive date, acquire the lock
-	Mau_DriveData::updateLock();
-
-        int i = DS_UDP_PROTOCOL_HEADER_LENGTH;
-        bool search = true;
-
-		int joy_id = 0;
-        while (i < length && search) {
-            int struct_size = data[i];
-            char tag = data[i + 1];
-            switch (tag) {
-				case DS_UDP_PROTOCOL_TAG_JOYSTICK_STATE:
-				{
-					_TempJoyData* joy = &joys[joy_id];
-					memset(joy,0,sizeof(_TempJoyData));
-					char axisCount = data[i + 2];
-					if (axisCount > HAL_kMaxJoystickAxes) {
-						axisCount = HAL_kMaxJoystickAxes;
-						printf("DriverComms::decodeUdpPacket got too-large axis count during Joystick Update; this event was discarded.  Value limited to miaximum.\n");
-					}
-					joy->axis_count = axisCount;
-					for (int ax = 0; ax < joy->axis_count; ax++) {
-						joy->axis[ax] = data[i + 2 + ax + 1];
-					}
-					int b = i + 2 + axisCount + 1;
-					joy->button_count = data[b];
-					int button_delta = (joy->button_count / 8 + ((joy->button_count % 8 == 0) ? 0 : 1));
-					uint32_t total_mask = 0;
-					for (int bm = 0; bm < button_delta; bm++) {
-						uint8_t m = data[b + bm + 1];
-						total_mask = (total_mask << (bm * 8)) | m;
-					}
-					joy->button_mask = total_mask;
-					b += button_delta + 1;
-					char povCount = data[b];
-					if (povCount > HAL_kMaxJoystickPOVs) {
-						povCount = HAL_kMaxJoystickPOVs;
-						printf("DriverComms::decodeUdpPacket got too-large POV count during Joystick Update; this event was discarded.  Value limited to miaximum.\n");
-					}
-					joy->pov_count = povCount;
-					int bytes_for_pov = 0;
-					for (int pv = 0; pv < joy->pov_count; pv++) {
-						uint8_t a1 = data[b + 1 + (pv * 2)];
-						uint8_t a2 = data[b + 1 + (pv * 2) + 1];
-						joy->pov[pv] = (uint16_t) (a1 << 8 | a2);
-						bytes_for_pov += 2;
-					}
-
-		            	    Mau_DriveData::updateJoyAxisUnsafe(joy_id, joy->axis_count, joy->axis);
-				    Mau_DriveData::updateJoyPOVUnsafe(joy_id, joy->pov_count, joy->pov);
-				    Mau_DriveData::updateJoyButtonsUnsafe(joy_id, joy->button_count, joy->button_mask);
-
-				    joy_id++;
-				}
-				break;
-
-				case DS_UDP_PROTOCOL_MATCH_TIME_COUNTDOWN:
-				{
-					float matchTime = ErrorOrPrintMessage::NetworkOrderedU32ToFloat(*(uint32_t *)(&data[i + 2]));
-					Mau_DriveData::updateMatchTimeUnsafe(matchTime);
-					break;
-				}
-				case DS_UDP_PROTOCOL_TAG_DATE_TIME:
-				{
-#if 0
-					printf("Received Date/Time Data.\n");
-#endif
-					// TODO:  Implement once purpose is understood.  Remember that lock is acquired during this period.
-					break;
-				}
-				case DS_UDP_PROTOCOL_TAG_TIME_ZONE:
-				{
-#if 0
-					printf("Received Time Zone Data.\n");
-#endif
-					// TODO:  Implement once purpose is understood.  Remember that lock is acquired during this period.
-					break;
-				}
-				default:
-					break;
+    if (!data || length < DS_UDP_PROTOCOL_HEADER_LENGTH) return MAU_COMMS_SHUTDOWN_NONE;
+    const auto* bytes = reinterpret_cast<const uint8_t*>(data);
+    if (bytes[DS_UDP_PROTOCOL_HEADER_INDEX_VERSION] != 1) return MAU_COMMS_SHUTDOWN_NONE;
+    PacketReader tags{{bytes + DS_UDP_PROTOCOL_HEADER_LENGTH,
+                       static_cast<size_t>(length - DS_UDP_PROTOCOL_HEADER_LENGTH)}};
+    std::array<_TempJoyData, HAL_kMaxJoysticks> parsed{};
+    int joyCount = 0;
+    bool hasMatchTime = false;
+    float matchTime = 0;
+    while (tags.remaining()) {
+        uint8_t size, tag;
+        std::span<const uint8_t> tagBytes;
+        if (!tags.read(size) || !size || !tags.take(size, tagBytes)) return MAU_COMMS_SHUTDOWN_NONE;
+        PacketReader fields{tagBytes};
+        fields.read(tag);
+        if (tag == DS_UDP_PROTOCOL_TAG_JOYSTICK_STATE) {
+            if (joyCount >= HAL_kMaxJoysticks) return MAU_COMMS_SHUTDOWN_NONE;
+            auto& joy = parsed[joyCount++];
+            std::span<const uint8_t> axes, buttons;
+            if (!fields.read(joy.axis_count) || joy.axis_count > HAL_kMaxJoystickAxes ||
+                !fields.take(joy.axis_count, axes) || !fields.read(joy.button_count) ||
+                joy.button_count > 32 || !fields.take((joy.button_count + 7) / 8, buttons) ||
+                !fields.read(joy.pov_count) || joy.pov_count > HAL_kMaxJoystickPOVs) return MAU_COMMS_SHUTDOWN_NONE;
+            for (size_t i = 0; i < axes.size(); ++i) joy.axis[i] = static_cast<int8_t>(axes[i]);
+            for (uint8_t byte : buttons) joy.button_mask = (joy.button_mask << 8) | byte;
+            for (int i = 0; i < joy.pov_count; ++i) {
+                if (!fields.read16(joy.pov[i])) return MAU_COMMS_SHUTDOWN_NONE;
             }
-            i += struct_size + 1;
+        } else if (tag == DS_UDP_PROTOCOL_MATCH_TIME_COUNTDOWN) {
+            std::span<const uint8_t> value;
+            if (!fields.take(4, value)) return MAU_COMMS_SHUTDOWN_NONE;
+            uint32_t bits = (static_cast<uint32_t>(value[0]) << 24) |
+                            (static_cast<uint32_t>(value[1]) << 16) |
+                            (static_cast<uint32_t>(value[2]) << 8) | value[3];
+            std::memcpy(&matchTime, &bits, sizeof(matchTime));
+            hasMatchTime = true;
         }
-
-	// Perform final update, release lock and signal that new data is available
-        Mau_DriveData::updateControlWordAndAllianceIDUnsafe(enabled, auton, test, eStop, fms, ds_attached, alliance);
-	Mau_DriveData::updateUnlockAndSignal();
-
-	uint64_t now_time = mau::vmxGetTime();
-	//uint64_t delta = now_time - lastDsUDPUpdateReceivedTimestamp;
-        lastDsUDPUpdateReceivedTimestamp = now_time;
     }
+
+    sq_1 = bytes[0];
+    sq_2 = bytes[1];
+    udp_ds_control = bytes[DS_UDP_PROTOCOL_HEADER_INDEX_CONTROLBYTE];
+    udp_ds_request = bytes[DS_UDP_PROTOCOL_HEADER_INDEX_REQUESTBYTE];
+    if (IS_BIT_SET(udp_ds_request, 0)) version_data_requested = true;
+    if (IS_BIT_SET(udp_ds_request, 2) || IS_BIT_SET(udp_ds_request, 3)) {
+        setRobotProgramStarted(false);
+        return IS_BIT_SET(udp_ds_request, 3) ? MAU_COMMS_SHUTDOWN_REBOOT : MAU_COMMS_SHUTDOWN_RESTART;
+    }
+    if (IS_BIT_SET(udp_ds_control, 7)) {
+        setRobotProgramStarted(false);
+        setRobotESTOPActive(true);
+        return MAU_COMMS_SHUTDOWN_ESTOP;
+    }
+
+    Mau_DriveData::updateLock();
+    for (int i = 0; i < HAL_kMaxJoysticks; ++i) {
+        joys[i] = parsed[i];
+        auto& joy = joys[i];
+        Mau_DriveData::updateJoyAxisUnsafe(i, joy.axis_count, joy.axis);
+        Mau_DriveData::updateJoyPOVUnsafe(i, joy.pov_count, joy.pov);
+        Mau_DriveData::updateJoyButtonsUnsafe(i, joy.button_count, joy.button_mask);
+    }
+    if (hasMatchTime) Mau_DriveData::updateMatchTimeUnsafe(matchTime);
+    Mau_DriveData::updateControlWordAndAllianceIDUnsafe(
+        IS_BIT_SET(udp_ds_control, 2), IS_BIT_SET(udp_ds_control, 1),
+        IS_BIT_SET(udp_ds_control, 0), false, IS_BIT_SET(udp_ds_control, 3), true,
+        static_cast<HAL_AllianceStationID>(bytes[DS_UDP_PROTOCOL_HEADER_INDEX_ALLIANCE_STATION_ID]));
+    Mau_DriveData::updateUnlockAndSignal();
+    lastDsUDPUpdateReceivedTimestamp = mau::vmxGetTime();
     return MAU_COMMS_SHUTDOWN_NONE;
 }
 
 namespace mau {
     namespace comms {
 
-    	// callback invoked whenever new data is available on the DS TCP Socket
+        static std::array<TcpPacketBuffer, MAX_NUM_DS_CONNECTIONS> tcpInput;
+
+        // Called by the single TCP worker; each accepted connection starts empty.
         void driverStationTCPDataReceivedCallback(int client_id, Toast::Net::Socket::ClientSocket sock) {
-			int ret = sock.read(ds_tcp_rcv_buffer, MAX_WPI_DRIVESTATION_TCP_READSIZE);
-			if (ret > 0) {
-				mau::comms::decodeTcpPacket(ds_tcp_rcv_buffer, ret);
-			}
+            if (client_id < 0 || client_id >= MAX_NUM_DS_CONNECTIONS) return;
+            int ret = sock.read(ds_tcp_rcv_buffer, MAX_WPI_DRIVESTATION_TCP_READSIZE);
+            if (ret > 0) {
+                tcpInput[client_id].append(
+                    {reinterpret_cast<const uint8_t*>(ds_tcp_rcv_buffer), static_cast<size_t>(ret)},
+                    [](std::span<const uint8_t> frame) {
+                        decodeTcpPacket(reinterpret_cast<char*>(const_cast<uint8_t*>(frame.data())), frame.size());
+                    });
+            } else if (ret == 0) {
+                tcpInput[client_id].reset();
+            }
         }
 
 	void tcpProcess() {
@@ -715,6 +604,9 @@ namespace mau {
 		printf("Error %d preparing DS Selective Server Socket!\n", ss_prepare_status);
 	    }
             ds_sock.on_data(mau::comms::driverStationTCPDataReceivedCallback);
+            ds_sock.on_connect([](int client_id, Toast::Net::Socket::ClientSocket) {
+                tcpInput[client_id].reset();
+            });
 	    if (dsServerSocket.SetReuseAddress() != 0) {
 	         printf("ERROR setting ServerSocket SO_REUSEADDR option.\n");
     	    }
@@ -982,7 +874,7 @@ namespace mau {
 
 						    // Initiate program shutdown
 					            if (shutdown_handler) {
-					            	shutdown_handler(MAU_COMMS_SHUTDOWN_RESTART);
+                            shutdown_handler(shutdown_code);
 					            } else {
 						            stop();
 						    }							

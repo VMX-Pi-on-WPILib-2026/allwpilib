@@ -353,6 +353,9 @@ const char* HAL_GetErrorMessage(int32_t code) {
         //    return ERR_FRCSystem_NoDSConnection_MESSAGE;
         /* Mau-specific errors */
 
+        case MAU_UNSUPPORTED_FEATURE:
+            return MAU_UNSUPPORTED_FEATURE_MESSAGE;
+
         case MAU_CHANNEL_MAP_ERROR:
         	return MAU_CHANNEL_MAP_ERROR_MESSAGE;
 

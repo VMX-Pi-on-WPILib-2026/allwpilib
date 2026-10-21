@@ -38,7 +38,7 @@ public:
 
     // Updates upon receipt of Driver Station Packets (from IO Worker Threads)
 
-    static void updateMatchGameSpecificMessage(uint8_t msg_len, uint8_t *msg_data);
+    static void updateMatchGameSpecificMessage(size_t msg_len, const uint8_t *msg_data);
     static void updateMatchIdentifyInfo(char *event_name, uint8_t match_type, uint16_t match_number, uint8_t replay_number);
 
     static void updateControlWordAndAllianceID(bool enabled, bool auton, bool test, bool eStop, bool fms, bool ds, HAL_AllianceStationID id);

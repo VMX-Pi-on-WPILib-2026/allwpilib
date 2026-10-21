@@ -218,6 +218,7 @@ namespace Toast {
 					API int accept();
 
 					API void on_data(std::function<void(int client_id, ClientSocket sock)> callback);
+                    API void on_connect(std::function<void(int client_id, ClientSocket sock)> callback);
 
 					API void send_to_all_connected_clients(char *buffer, size_t length);
 					API void prune_disconnected_clients();
@@ -231,6 +232,7 @@ namespace Toast {
 					int _highsock;
 					Socket::SOCKET *_connectionlist;
 					std::function<void(int client_id, ClientSocket sock)> _cb = nullptr;
+                    std::function<void(int client_id, ClientSocket sock)> _connect_cb = nullptr;
 			};
 
 			class DatagramSocket {

@@ -339,6 +339,7 @@ int Socket::SelectiveServerSocket::accept() {
 				if (_connectionlist[i] == 0) {
 					// Connection Accepted
 					_connectionlist[i] = connection;
+                    if (_connect_cb) _connect_cb(i, connection);
 					connection = -1;
 				}
 			}
@@ -361,6 +362,10 @@ int Socket::SelectiveServerSocket::accept() {
 
 void Socket::SelectiveServerSocket::on_data(std::function<void(int client_id, Socket::ClientSocket sock)> callback) {
 	_cb = callback;
+}
+
+void Socket::SelectiveServerSocket::on_connect(std::function<void(int client_id, Socket::ClientSocket sock)> callback) {
+    _connect_cb = callback;
 }
 
 void Socket::SelectiveServerSocket::send_to_all_connected_clients(char *buffer, size_t length) {

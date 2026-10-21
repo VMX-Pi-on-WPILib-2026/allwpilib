@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include "hal/DriverStationTypes.h"
 
 #define IS_BIT_SET(expression, bit) ((expression & (1 << bit)) != 0)
 
@@ -19,8 +20,8 @@ namespace mau {
     namespace comms {
         typedef struct {
             uint8_t axis_count, pov_count, button_count;
-            uint16_t pov[4];
-            int8_t axis[16];
+            uint16_t pov[HAL_kMaxJoystickPOVs];
+            int8_t axis[HAL_kMaxJoystickAxes];
             uint32_t button_mask;
             bool has_update;
         } _TempJoyData;
@@ -30,7 +31,7 @@ namespace mau {
         extern uint8_t control;
         extern uint8_t req;
 
-        extern _TempJoyData joys[6];
+        extern _TempJoyData joys[HAL_kMaxJoysticks];
         extern long long lastDecodeTime;
     	extern void (*shutdown_handler)(int);
 

@@ -13,6 +13,7 @@
 #include "PortsInternal.h"
 #include "MauInternal.h"
 #include <VMXIO.h>
+#include <cmath>
 
 using namespace hal;
 
@@ -172,6 +173,7 @@ extern "C" {
             *status = VOLTAGE_OUT_OF_RANGE;
         }
         int32_t LSBWeight = HAL_GetAnalogLSBWeight(analogPortHandle, status);
+        if (LSBWeight <= 0) return 0;
         int32_t offset = HAL_GetAnalogOffset(analogPortHandle, status);
         int32_t value =
                 static_cast<int32_t>((voltage + offset * 1.0e-9) / (LSBWeight * 1.0e-9));
@@ -198,12 +200,18 @@ extern "C" {
     }
 
     int32_t HAL_GetAnalogLSBWeight(HAL_AnalogInputHandle analogPortHandle, int32_t* status) {
-		float full_scale_voltage = 5.0;
-		constexpr int32_t kNanovoltsPerVolt = 1000000000;
-        mau::vmxIO->Accumulator_GetFullScaleVoltage(full_scale_voltage, status);
-        mau::ClearBoardCommErrorStatus(status);
-		double full_scale_nanovolts = static_cast<double>(full_scale_voltage) * kNanovoltsPerVolt;
-		return static_cast<int32_t>(full_scale_nanovolts);
+        if (!analogInputHandles->Get(analogPortHandle)) {
+            *status = HAL_HANDLE_ERROR;
+            return 0;
+        }
+        float fullScaleVoltage = 0;
+        if (!mau::vmxIO->Accumulator_GetFullScaleVoltage(fullScaleVoltage, status)) return 0;
+        if (!std::isfinite(fullScaleVoltage) || fullScaleVoltage <= 0 || fullScaleVoltage > 5.5f) {
+            *status = PARAMETER_OUT_OF_RANGE;
+            return 0;
+        }
+        // VMX ADC samples have 12 bits before oversampling/averaging.
+        return static_cast<int32_t>(std::lround(static_cast<double>(fullScaleVoltage) * 1.0e9 / 4096));
     }
 
     /* Returns the amount of ADC offset voltage, in units of nanovolts */

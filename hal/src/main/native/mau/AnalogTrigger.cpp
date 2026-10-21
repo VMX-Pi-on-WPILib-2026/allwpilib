@@ -13,6 +13,7 @@
 #include "hal/handles/HandlesInternal.h"
 #include "hal/handles/LimitedHandleResource.h"
 #include "HALInitializer.h"
+#include "HALInternal.h"
 #include "PortsInternal.h"
 #include "MauInternal.h"
 #include "AnalogTriggerInternal.h"
@@ -250,49 +251,23 @@ extern "C" {
         HAL_SetAnalogTriggerLimitsRaw(analogTriggerHandle, lower, upper, status);
     }
 
-    // TODO:  Implement AnalogTrigger Averaging (using output from Oversample/Avg engine).
-    void HAL_SetAnalogTriggerAveraged(HAL_AnalogTriggerHandle analogTriggerHandle, HAL_Bool useAveragedValue,
+    // The VMX SDK routes analog triggers from raw ADC samples only.
+    void HAL_SetAnalogTriggerAveraged(HAL_AnalogTriggerHandle handle, HAL_Bool enabled,
                                       int32_t* status) {
-        auto trigger = analogTriggerHandles->Get(analogTriggerHandle);
-        if (trigger == nullptr) {
-            *status = HAL_HANDLE_ERROR;
-            return;
+        if (!analogTriggerHandles->Get(handle)) { *status = HAL_HANDLE_ERROR; return; }
+        if (enabled) {
+            *status = MAU_UNSUPPORTED_FEATURE;
+            hal::SetLastError(status, "VMX-pi SDK does not support averaged analog triggers");
         }
-
-    //    AnalogTriggerData* triggerData = &SimAnalogTriggerData[trigger->wpiIndex];
-    //
-    //    if (triggerData->GetTriggerMode() == HALSIM_AnalogTriggerFiltered) {
-    //        *status = INCOMPATIBLE_STATE;
-    //        return;
-    //    }
-    //
-    //    auto setVal = useAveragedValue ? HALSIM_AnalogTriggerAveraged
-    //                                   : HALSIM_AnalogTriggerUnassigned;
-    //    triggerData->SetTriggerMode(setVal);
     }
 
-    // TODO:  Implement AnalogTrigger Filtering.
-    // The analog trigger will operate with a 3 point average rejection filter. This
-    // is designed to help with 360 degree pot applications for the period where
-    // the pot crosses through zero.
-    void HAL_SetAnalogTriggerFiltered(HAL_AnalogTriggerHandle analogTriggerHandle, HAL_Bool useFilteredValue,
+    void HAL_SetAnalogTriggerFiltered(HAL_AnalogTriggerHandle handle, HAL_Bool enabled,
                                       int32_t* status) {
-        auto trigger = analogTriggerHandles->Get(analogTriggerHandle);
-        if (trigger == nullptr) {
-            *status = HAL_HANDLE_ERROR;
-            return;
+        if (!analogTriggerHandles->Get(handle)) { *status = HAL_HANDLE_ERROR; return; }
+        if (enabled) {
+            *status = MAU_UNSUPPORTED_FEATURE;
+            hal::SetLastError(status, "VMX-pi SDK does not support filtered analog triggers");
         }
-
-    //    AnalogTriggerData* triggerData = &SimAnalogTriggerData[trigger->wpiIndex];
-    //
-    //    if (triggerData->GetTriggerMode() == HALSIM_AnalogTriggerAveraged) {
-    //        *status = INCOMPATIBLE_STATE;
-    //        return;
-    //    }
-    //
-    //    auto setVal = useFilteredValue ? HALSIM_AnalogTriggerAveraged
-    //                                   : HALSIM_AnalogTriggerUnassigned;
-    //    triggerData->SetTriggerMode(setVal);
     }
 
     HAL_Bool HAL_GetAnalogTriggerInWindow(HAL_AnalogTriggerHandle analogTriggerHandle, int32_t* status) {
