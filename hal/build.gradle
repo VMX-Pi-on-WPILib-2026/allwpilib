@@ -1,4 +1,7 @@
 ext {
+    // Directory holding the VMX-pi platform library: include/*.h and lib/libvmxpi_hal_cpp.so (aarch64)
+    vmxpiHalDir = file(project.findProperty('vmxpiHalDir') ?: "${rootDir}/vmxpi-hal")
+
     addHalDependency = { binary, shared->
         binary.lib project: ':hal', library: 'hal', linkage: shared
     }
@@ -23,6 +26,24 @@ ext {
                     exportedHeaders {
                         srcDir 'src/main/native/include'
                         srcDir generatedHeaders
+                    }
+                }
+            }
+        } else if (it.targetPlatform.name == nativeUtils.wpi.platforms.linuxarm64) {
+            // VMX-pi: the mau backend talks to the VMX-pi through libvmxpi_hal_cpp
+            it.sources {
+                mauCpp(CppSourceSet) {
+                    source {
+                        srcDirs = ['src/main/native/mau']
+                        include '*.cpp', 'rev/*.cpp', 'Translator/*.cpp', 'DriveStation/*.cpp', 'navX/src/*.cpp'
+                    }
+                    exportedHeaders {
+                        srcDir 'src/main/native/include'
+                        srcDir generatedHeaders
+                        srcDir 'src/main/native/mau'
+                        srcDir 'src/main/native/mau/DriveStation/include'
+                        srcDir 'src/main/native/mau/navX/include'
+                        srcDir "${vmxpiHalDir}/include"
                     }
                 }
             }
@@ -60,6 +81,10 @@ cppSourcesZip {
     from('src/main/native/sim') {
         into '/sim'
     }
+
+    from('src/main/native/mau') {
+        into '/mau'
+    }
 }
 
 cppHeadersZip {
@@ -85,6 +110,13 @@ model {
         all {
             if (!(it instanceof NativeBinarySpec)) return
                 if (it.component.name != 'hal' && it.component.name != 'halBase') return
+                if (it.targetPlatform.name == nativeUtils.wpi.platforms.linuxarm64) {
+                    def vmxLib = file("${vmxpiHalDir}/lib/libvmxpi_hal_cpp.so")
+                    if (vmxLib.exists() && !(it instanceof StaticLibraryBinarySpec)) {
+                        it.linker.args << vmxLib.absolutePath
+                    }
+                    return
+                }
                 if (it.targetPlatform.name != nativeUtils.wpi.platforms.roborio) return
                 nativeUtils.useRequiredLibrary(it, 'ni_link_libraries')
         }

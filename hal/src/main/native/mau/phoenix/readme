@@ -1,0 +1,63 @@
+This directory contains code/build files to generate a "CTRE Phoenix-compilant platform" shared library.
+
+Purpose:
+
+The purpose of this library is to allow the phoenix library to access the CAN bus interface provided
+by the VMX-pi Platform.
+
+Library name:
+
+Following the current phoenix convention, the exact name of this library must be: libCTRE_PhoenixPlatform.so
+
+This library is accessed by the libCTRE_PhoenixCanutils.so file.  Raspbian versions of this library are available at:
+
+  http://devsite.ctr-electronics.com/maven/release/com/ctre/phoenix/canutils/
+
+Other phoenix libraries 
+
+External Dependencies:
+
+  * Phoenix
+
+    This library implements the interface defined in the headers available at:
+
+         http://devsite.ctr-electronics.com/maven/release/com/ctre/phoenix/core/
+
+         Within the <latest_version>/core-<latest_version>-headers.zip file
+
+    These header files are also available via Git checkout from:
+
+         https://github.com/CrossTheRoadElec/Phoenix-Linux-SocketCAN-Example
+
+         within the include/ctre directory
+
+Internal Dependencies:
+
+This library is also dependent upon the "Mau" version of the WPI Library HAL, and the underlying VMX-pi platform libraries.
+
+** Usage Dependencies
+
+A WPI library-based application requires the following components to use the CTRE Phoenix platform with the VMX-pi:
+
+    - CTRE_PhoenixPlatform.so (this library)
+    - CTRE_PhoenixCanutils.so
+        http://devsite.ctr-electronics.com/maven/release/com/ctre/phoenix/canutils/
+    - CTRE_PhoenixCCI.so
+        http://devsite.ctr-electronics.com/maven/release/com/ctre/phoenix/cci/
+    - CTRE_Phoenix.a
+        http://devsite.ctr-electronics.com/maven/release/com/ctre/phoenix/api-cpp/
+    - CTRE_Phoenix_WPI.a
+        http://devsite.ctr-electronics.com/maven/release/com/ctre/phoenix/wpiapi-cpp/
+
+Note that these dependencies (for FRC on the "athena" platform) are documented in the "vendordeps" file at:
+
+    http://devsite.ctr-electronics.com/maven/release/com/ctre/phoenix/Phoenix-latest.json
+
+    (The windows installer also installs that file to this location):
+
+    C:\Users\Public\frc2019\vendordeps\Phoenix.json
+
+
+
+
+

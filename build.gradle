@@ -43,6 +43,8 @@ develocity {
     buildScan {
         termsOfUseUrl = "https://gradle.com/help/legal-terms-of-use"
         termsOfUseAgree = "yes"
+        // Only publish build scans to gradle.com from CI, never from local builds
+        publishing.onlyIf { System.getenv('CI') != null }
     }
 }
 
