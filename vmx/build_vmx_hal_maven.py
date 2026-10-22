@@ -2,7 +2,7 @@
 """Builds the VMX-pi HAL Maven repository used by the VMX GradleRIO fork.
 
 The repository holds edu.wpi.first.hal:hal-cpp and hal-java at a VMX version
-(for example 2026.2.2-vmx.1):
+(for example 2026.2.2-vmx.2):
 
   - linuxarm64 binaries (and the headers/sources zips): this tree's VMX-pi
     HAL (hal/src/main/native/mau), built with Gradle;
@@ -13,7 +13,7 @@ libvmxpi_hal_cpp.so is NOT included: libwpiHal.so only references it, and the
 robot provides it (vmxpi-hal package). Do not add it here.
 
 Usage (from the allwpilib root, with a JDK that runs Gradle 8.14, e.g. 21):
-  python3 vmx/build_vmx_hal_maven.py --vmx-version 2026.2.2-vmx.1
+  python3 vmx/build_vmx_hal_maven.py --vmx-version 2026.2.2-vmx.2
 """
 
 import argparse
@@ -73,7 +73,7 @@ def write_metadata(artifact_dir: Path, artifact: str, version: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--vmx-version", required=True, help="e.g. 2026.2.2-vmx.1")
+    parser.add_argument("--vmx-version", required=True, help="e.g. 2026.2.2-vmx.2")
     parser.add_argument("--upstream-version", help="WPILib release for the other platforms "
                         "(default: the VMX version without its -vmx.N suffix)")
     parser.add_argument("--output", type=Path,
