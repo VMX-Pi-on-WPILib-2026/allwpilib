@@ -49,14 +49,15 @@ JDK that runs Gradle 8.14 (17 or 21).
 2. Build the VMX HAL Maven repository used by the VMX GradleRIO fork:
 
    ```bash
-   python3 vmx/build_vmx_hal_maven.py --vmx-version 2026.2.2-vmx.3 --with-robot-libraries
+   python3 vmx/build_vmx_hal_maven.py --vmx-version 2026.2.2-vmx.4 --with-robot-libraries
    ```
 
    It builds `:hal` for linuxarm64 and writes `edu.wpi.first.hal:hal-cpp` / `hal-java`
    at that version into `~/wpilib/2026/vmx/maven`, with the other platforms taken from
    the upstream WPILib release (2026.2.2). `--with-robot-libraries` also builds
    custom wpilibc (linuxarm64) and wpilibj with the Studica APIs at the same
-   version. `libvmxpi_hal_cpp.so` is not copied.
+   version. The VMX HAL also retains WPILib HALSIM callbacks used by wpilibc.
+   `libvmxpi_hal_cpp.so` is not copied.
 
 Just the library: `./gradlew :hal:linkHalReleaseSharedLibrary -Ponlylinuxarm64`.
 

@@ -46,6 +46,19 @@ ext {
                         srcDir "${vmxpiHalDir}/include"
                     }
                 }
+                // wpilibc includes its public simulation adapters on every native platform.
+                // Keep the HALSIM callback symbols available so loading libwpilibc succeeds.
+                mockdataCpp(CppSourceSet) {
+                    source {
+                        srcDirs = ['src/main/native/sim/mockdata']
+                        include '*.cpp'
+                    }
+                    exportedHeaders {
+                        srcDir 'src/main/native/include'
+                        srcDir generatedHeaders
+                        srcDir 'src/main/native/sim'
+                    }
+                }
             }
         } else {
             it.sources {

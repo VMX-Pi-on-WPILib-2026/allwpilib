@@ -23,6 +23,7 @@
 #include "hal/Extensions.h"
 #include "hal/handles/HandlesInternal.h"
 #include "HALInitializer.h"
+
 #include "MauClockInternal.h"
 #include "MauInternal.h"
 #include "Translator/include/FileHandler.h"
@@ -33,6 +34,31 @@
 #include "DriveStation/include/DriverComms.hpp"
 
 using namespace hal;
+
+namespace hal::init {
+void InitializeAccelerometerData();
+void InitializeAddressableLEDData();
+void InitializeAnalogGyroData();
+void InitializeAnalogInData();
+void InitializeAnalogOutData();
+void InitializeAnalogTriggerData();
+void InitializeCanData();
+void InitializeDigitalPWMData();
+void InitializeDutyCycleData();
+void InitializeDIOData();
+void InitializeDriverStationData();
+void InitializeEncoderData();
+void InitializeI2CData();
+void InitializeCTREPCMData();
+void InitializeREVPHData();
+void InitializePowerDistributionData();
+void InitializePWMData();
+void InitializeRelayData();
+void InitializeRoboRioData();
+void InitializeSimDeviceData();
+void InitializeSPIAccelerometerData();
+void InitializeSPIData();
+}  // namespace hal::init
 
 Mau_FileHandler* fileHandler = 0;
 VMXPi* vmxpi = 0;
@@ -131,6 +157,30 @@ namespace hal {
         bool InitializeHAL() {
 
 	    bool success = true;
+            // wpilibc includes simulation adapters that reference these HALSIM APIs on hardware too.
+            // Initialize the callback stores so native loading and optional APIs are safe.
+            InitializeAccelerometerData();
+            InitializeAddressableLEDData();
+            InitializeAnalogGyroData();
+            InitializeAnalogInData();
+            InitializeAnalogOutData();
+            InitializeAnalogTriggerData();
+            InitializeCanData();
+            InitializeDigitalPWMData();
+            InitializeDutyCycleData();
+            InitializeDIOData();
+            InitializeDriverStationData();
+            InitializeEncoderData();
+            InitializeI2CData();
+            InitializeCTREPCMData();
+            InitializeREVPHData();
+            InitializePowerDistributionData();
+            InitializePWMData();
+            InitializeRelayData();
+            InitializeRoboRioData();
+            InitializeSimDeviceData();
+            InitializeSPIAccelerometerData();
+            InitializeSPIData();
        	    Mau_DriveData::initializeDriveData();
 
             fileHandler = new Mau_FileHandler();
