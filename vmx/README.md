@@ -49,7 +49,7 @@ JDK that runs Gradle 8.14 (17 or 21).
 2. Build the VMX HAL Maven repository used by the VMX GradleRIO fork:
 
    ```bash
-   python3 vmx/build_vmx_hal_maven.py --vmx-version 2026.2.2-vmx.6 --with-robot-libraries
+   python3 vmx/build_vmx_hal_maven.py --vmx-version 2026.2.2-vmx.8 --with-robot-libraries
    ```
 
    It builds `:hal` for linuxarm64 and writes `edu.wpi.first.hal:hal-cpp` / `hal-java`
@@ -96,3 +96,10 @@ The in-tree wpilibc and wpilibj include the original `studica::TitanQuad` /
 `com.studica.frc.TitanQuad` APIs and their encoder, Cobra, servo and LiDAR
 classes. See [Studica integration](studica/README.md) for build requirements,
 source compatibility, motor disable behavior, sensor models and host tests.
+
+## Onboard VMX IMU
+
+`frc::VMXIMU` and `edu.wpi.first.wpilibj.VMXIMU` expose the onboard IMU through
+the existing VMX HAL, without an external navX vendordep or an additional SPI
+connection. See [VMX IMU](imu/README.md) for API units, shared lifetime, usage and
+host regression tests.
