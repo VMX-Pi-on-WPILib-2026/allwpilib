@@ -252,15 +252,19 @@ void HAL_FlushSerial(HAL_SerialPortHandle handle, int32_t* status);
 void HAL_ClearSerial(HAL_SerialPortHandle handle, int32_t* status);
 
 /**
- * Closes a serial port.
+ * Sets the USB serial DTR modem line, used by Studica/YDLIDAR motor control.
  *
- * @param[in] handle  the serial port handle to close
- */
-/** Sets the USB serial DTR modem line (used by Studica/YDLIDAR motor control).
- * Returns a serial error when modem-line control is unavailable.
+ * @param[in] handle the serial port handle
+ * @param[in] asserted true to assert DTR, false to clear it
+ * @param[out] status error status, nonzero when modem-line control is unavailable
  */
 void HAL_SetSerialDTR(HAL_SerialPortHandle handle, HAL_Bool asserted, int32_t* status);
 
+/**
+ * Closes a serial port.
+ *
+ * @param[in] handle the serial port handle to close
+ */
 void HAL_CloseSerial(HAL_SerialPortHandle handle);
 #ifdef __cplusplus
 }  // extern "C"
