@@ -81,7 +81,7 @@ namespace Toast {
             API int socket_connect(SOCKET s, std::string host, int port);
 			API int socket_nonblock(SOCKET s);
             API int socket_bind(SOCKET s, int port);
-            API void socket_listen(SOCKET s, int backfill = 128);
+            API int socket_listen(SOCKET s, int backfill = 128);
             API SOCKET socket_accept(SOCKET s, Socket::SocketAddress *addr);
             API int socket_quit();
 			API int socket_last_error();

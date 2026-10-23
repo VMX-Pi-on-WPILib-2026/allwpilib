@@ -618,10 +618,23 @@ namespace mau {
             // The secondary logging server socket accepts multiple TCP client connections
             // This is configured as non-blocking.
             Toast::Net::Socket::ServerSocket logServerSocket(WPI_LOGGING_PORT);
-            Toast::Net::Socket::socket_nonblock(logServerSocket.get_socket());
+            int log_nonblock_status = Toast::Net::Socket::socket_nonblock(logServerSocket.get_socket());
+            if (log_nonblock_status != 0) {
+                printf("Error %d setting log server socket nonblocking!\n", log_nonblock_status);
+            }
             Toast::Net::Socket::SelectiveServerSocket log_sock(logServerSocket.get_socket(), MAX_NUM_CLIENT_CONNECTIONS);
-            log_sock.prepare();
-            logServerSocket.open();
+            int log_prepare_status = log_sock.prepare();
+            if (log_prepare_status != 0) {
+                printf("Error %d preparing log selective server socket!\n", log_prepare_status);
+            }
+            if (logServerSocket.SetReuseAddress() != 0) {
+                perror("ERROR setting log ServerSocket SO_REUSEADDR option");
+            }
+            int log_open_status = logServerSocket.open();
+            if (log_open_status != 0) {
+                perror("Bind Failed for RioLog server. Error");
+                printf("Error %d opening RioLog server socket on port %d!\n", log_open_status, WPI_LOGGING_PORT);
+            }
 
 	    int num_ds_connected_clients = 0;
 	    int num_log_connected_clients = 0;
@@ -726,11 +739,19 @@ namespace mau {
 					// Send pending logging messages to DS client and all non-DS logging clients (if any are connected).
 					// Always send the oldest messages first.
 					// Note that all client sockets are also non-blocking.
-					if (ds_sock.get_num_connected_clients() > 0) {
+					const bool has_ds_clients = ds_sock.get_num_connected_clients() > 0;
+					const bool has_log_clients = log_sock.get_num_connected_clients() > 0;
+					if (has_ds_clients || has_log_clients) {
 					    MessageHeader *p_head = RemoveHead();
 					    while (p_head) {
-						ds_sock.send_to_all_connected_clients(static_cast<char *>(static_cast<void *>(&(p_head->len))), ntohs(p_head->len) + sizeof(uint16_t));
-						log_sock.send_to_all_connected_clients(static_cast<char *>(static_cast<void *>(&(p_head->len))), ntohs(p_head->len) + sizeof(uint16_t));
+						char *message = static_cast<char *>(static_cast<void *>(&(p_head->len)));
+						auto message_size = ntohs(p_head->len) + sizeof(uint16_t);
+						if (has_ds_clients) {
+						    ds_sock.send_to_all_connected_clients(message, message_size);
+						}
+						if (has_log_clients) {
+						    log_sock.send_to_all_connected_clients(message, message_size);
+						}
 						FreeMessageMemory(p_head);
 						p_head = RemoveHead();
 					    }

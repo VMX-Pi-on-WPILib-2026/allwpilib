@@ -101,8 +101,8 @@ int Socket::socket_bind(Socket::SOCKET s, int port) {
     return ::bind(s, (struct sockaddr *)&addr, sizeof(addr));
 }
 
-void Socket::socket_listen(Socket::SOCKET s, int backfill) {
-    listen(s, backfill);
+int Socket::socket_listen(Socket::SOCKET s, int backfill) {
+    return listen(s, backfill);
 }
 
 Socket::SOCKET Socket::socket_accept(SOCKET s, Socket::SocketAddress *addr) {
@@ -204,8 +204,7 @@ int Socket::ServerSocket::open() {
     if (ret != 0) {
         return ret;
     }
-    Socket::socket_listen(_socket);
-    return 0;
+    return Socket::socket_listen(_socket);
 }
 
 int Socket::ServerSocket::SetReuseAddress() {
@@ -273,8 +272,7 @@ int Socket::UnixDomainServerSocket::open() {
 	if (ret != 0) {
 		return ret;
 	}
-	Socket::socket_listen(_socket);
-	return 0;
+	return Socket::socket_listen(_socket);
 }
 
 int Socket::UnixDomainServerSocket::close() {
