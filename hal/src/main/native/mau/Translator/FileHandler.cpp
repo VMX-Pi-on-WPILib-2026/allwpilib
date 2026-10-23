@@ -335,8 +335,10 @@ Mau_EnumConverter* Mau_FileHandler::Mau_FileHandler::readEnums() {
     assert(vmxDoc.IsObject());
 
     for(int handleCount = 0; handleCount < 20; handleCount++) {
-        auto value = std::to_string(handleCount).c_str();
-        std::string label = vmxDoc["HAL_HandleEnum"][value].GetString();
+        // Keep the key string alive while RapidJSON looks it up. Taking c_str()
+        // directly from the temporary std::string leaves a dangling pointer.
+        const std::string value = std::to_string(handleCount);
+        std::string label = vmxDoc["HAL_HandleEnum"][value.c_str()].GetString();
         hal::HAL_HandleEnum handle = (hal::HAL_HandleEnum) handleCount;
         enums->setHandlePair(label, handle);
     }
