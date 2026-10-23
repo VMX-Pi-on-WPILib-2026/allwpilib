@@ -21,6 +21,7 @@ task generateCppVersion() {
 
     outputs.file wpilibVersionFileOutput
     inputs.file wpilibVersionFileInput
+    inputs.property "wpilibVersion", wpilibVersioning.version
 
     if (wpilibVersioning.releaseMode) {
         outputs.upToDateWhen { false }

@@ -103,19 +103,20 @@ new SerialPort Java code with an older HAL JNI, which lacks serialSetDTR.
   -Dmaven.repo.local="$HOME/wpilib/2026/vmx/maven"
 ```
 
-This builds artifacts locally; it does not publish a release. `2026.2.2-vmx.3`
-is an example of a new build version, not an already published version.
+This builds artifacts locally. The matching published package is allwpilib
+`2026.2.2-vmx.3`; install it with VMX2026 extension 2.0.4 or later.
 A robot project must resolve the matching custom **wpilibc-cpp / wpilibj-java**
-and HAL artifacts, instead of the upstream 2026.2.2 WPILib artifacts. The current
-extension release selects only the VMX HAL; it must be updated during the next
-release to also select the custom wpilibc/wpilibj version. Installing the old
-extension alone does not install these new APIs.
+and HAL artifacts, instead of the upstream 2026.2.2 WPILib artifacts. VMX2026 extension 2.0.4 recognizes the release manifest
+`robotLibraries` capability and selects the matching custom wpilibc/wpilibj for
+VMX targets. Run `Update VMX2026 Version` after installing the extension.
+Remove the old Titan vendor dependency. RoboRIO targets keep upstream robot
+libraries; older extension versions do not install the added Studica APIs.
 
-Until that extension release exists, a project using the VMX GradleRIO fork can
-select the local custom artifacts explicitly in `build.gradle`:
+For manual local builds without extension-managed dependencies, a project using
+the VMX GradleRIO fork can select the local artifacts explicitly in `build.gradle`:
 
 ```groovy
-def studicaVmxVersion = '2026.2.2-vmx.3' // the local build version above
+def studicaVmxVersion = '2026.2.2-vmx.3' // matching custom build or release version
 wpi.versions.vmxHalVersion.set(studicaVmxVersion)
 configurations.configureEach {
     resolutionStrategy.eachDependency { dependency ->

@@ -11,6 +11,11 @@ task cppSourcesZip(type: Zip) {
     archiveBaseName = zipBaseName
     archiveClassifier = "sources"
 
+    from([rootProject.file('vmx/studica/NOTICE.md'),
+          rootProject.file('vmx/studica/Studica-ROS2-LICENSE.txt')]) {
+        into '/studica'
+    }
+
     from(licenseFile) {
         into '/'
     }
@@ -29,6 +34,11 @@ task cppHeadersZip(type: Zip) {
     destinationDirectory = outputsFolder
     archiveBaseName = zipBaseName
     archiveClassifier = "headers"
+
+    from([rootProject.file('vmx/studica/NOTICE.md'),
+          rootProject.file('vmx/studica/Studica-ROS2-LICENSE.txt')]) {
+        into '/studica'
+    }
 
     from(licenseFile) {
         into '/'

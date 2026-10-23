@@ -22,10 +22,11 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-UPSTREAM_URL = "https://frcmaven.wpi.edu/artifactory/release"
+UPSTREAM_URL = "https://frcmaven.wpi.edu/artifactory/api/download/release"
 GROUP_PATH = "edu/wpi/first/hal"
 
 # Classifiers of hal-cpp that come from upstream (everything but linuxarm64).
@@ -37,12 +38,14 @@ UPSTREAM_CLASSIFIERS = [
 ]
 
 
-def run_gradle(vmx_version: str, built_repo: Path) -> None:
+def run_gradle(vmx_version: str, built_repo: Path, robot_libraries: bool) -> None:
     cmd = [
         str(ROOT / "gradlew"), ":hal:publishToMavenLocal",
         "-Ponlylinuxarm64", f"-PpublishVersion={vmx_version}", "-PskipJavaFormat",
         f"-Dmaven.repo.local={built_repo}", "--no-scan",
     ]
+    if robot_libraries:
+        cmd[2:2] = [":wpilibc:publishToMavenLocal", ":wpilibj:publishToMavenLocal"]
     print("+", " ".join(cmd), flush=True)
     subprocess.run(cmd, cwd=ROOT, check=True)
 
@@ -52,9 +55,11 @@ def download(url: str, dest: Path, cache: Path) -> None:
     if not cached.exists():
         print(f"downloading {url}", flush=True)
         tmp = cached.with_suffix(cached.suffix + ".part")
-        with urllib.request.urlopen(url) as response, open(tmp, "wb") as out:
+        with urllib.request.urlopen(url, timeout=120) as response, open(tmp, "wb") as out:
             shutil.copyfileobj(response, out)
         tmp.rename(cached)
+    if not zipfile.is_zipfile(cached):
+        raise ValueError(f"Expected a ZIP archive: {cached}")
     shutil.copyfile(cached, dest)
 
 
@@ -81,18 +86,22 @@ def main() -> int:
                         help="Maven repository to write into (default: ~/wpilib/2026/vmx/maven)")
     parser.add_argument("--work", type=Path, default=ROOT / "build" / "vmx-maven",
                         help="scratch directory (Gradle output and download cache)")
+    parser.add_argument("--with-robot-libraries", action="store_true",
+                        help="Also build and include custom wpilibc/wpilibj at the same version")
+    parser.add_argument("--built-repo", type=Path,
+                        help="Reuse this Gradle publication repository with --skip-build")
     parser.add_argument("--skip-build", action="store_true",
                         help="reuse the previous Gradle output in --work")
     args = parser.parse_args()
 
     vmx_version = args.vmx_version
     upstream_version = args.upstream_version or vmx_version.split("-vmx")[0]
-    built_repo = args.work / "built"
+    built_repo = args.built_repo or args.work / "built"
     cache = args.work / "cache"
     cache.mkdir(parents=True, exist_ok=True)
 
     if not args.skip_build:
-        run_gradle(vmx_version, built_repo)
+        run_gradle(vmx_version, built_repo, args.with_robot_libraries)
 
     for artifact in ["hal-cpp", "hal-java"]:
         src = built_repo / GROUP_PATH / artifact / vmx_version
@@ -103,6 +112,14 @@ def main() -> int:
         for f in src.iterdir():
             shutil.copyfile(f, dst / f.name)
         write_metadata(dst.parent, artifact, vmx_version)
+
+    if args.with_robot_libraries:
+        for group, artifact in [("wpilibc", "wpilibc-cpp"), ("wpilibj", "wpilibj-java")]:
+            relative = Path("edu/wpi/first") / group / artifact / vmx_version
+            src = built_repo / relative
+            if not src.is_dir():
+                sys.exit(f"missing custom robot library {src}")
+            shutil.copytree(src, args.output / relative, dirs_exist_ok=True)
 
     cpp_dst = args.output / GROUP_PATH / "hal-cpp" / vmx_version
     base = f"{UPSTREAM_URL}/{GROUP_PATH}/hal-cpp/{upstream_version}"
