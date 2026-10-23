@@ -206,6 +206,14 @@ public class SerialPortJNI extends JNIWrapper {
    */
   public static native void serialClose(int handle);
 
+  /**
+   * Sets the USB serial DTR modem line.
+   *
+   * @param handle serial port handle
+   * @param asserted true to assert DTR
+   */
+  public static native void serialSetDTR(int handle, boolean asserted);
+
   /** Utility class. */
   private SerialPortJNI() {}
 }

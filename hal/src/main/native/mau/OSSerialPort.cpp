@@ -6,6 +6,7 @@
 /*----------------------------------------------------------------------------*/
 
 #include "OSSerialPort.h"
+#include "LinuxSerialBaud.h"
 
 #include <stdlib.h>
 #include <dirent.h>
@@ -167,12 +168,19 @@ void HAL_SetOSSerialBaudRate(HAL_SerialPortHandle handle, int32_t baud,
       baudRate = B115200;
       break;
     default:
-      *status = PARAMETER_OUT_OF_RANGE;
+      // The original Studica/YDLIDAR device requires a nonstandard 128000 baud.
+      // BOTHER also supports other positive rates accepted by the USB adapter.
+      if (baud <= 0) *status = PARAMETER_OUT_OF_RANGE;
+      else if (!hal::vmx::SetCustomSerialBaud(portHandles[port], baud))
+        *status = HAL_SERIAL_PORT_ERROR;
       return;
   }
 
   struct termios options;
-  tcgetattr(portHandles[port], &options);
+  if (tcgetattr(portHandles[port], &options) != 0) {
+    *status = HAL_SERIAL_PORT_ERROR;
+    return;
+  }
   auto set = cfsetospeed(&options, baudRate);
   if (set != 0) {
     *status = HAL_SERIAL_PORT_ERROR;

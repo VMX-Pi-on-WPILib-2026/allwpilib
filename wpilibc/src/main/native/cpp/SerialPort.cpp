@@ -154,3 +154,9 @@ void SerialPort::Reset() {
   HAL_ClearSerial(m_portHandle, &status);
   FRC_CheckErrorStatus(status, "Reset");
 }
+
+void SerialPort::SetDTR(bool asserted) {
+  int32_t status=0;
+  HAL_SetSerialDTR(m_portHandle,asserted,&status);
+  FRC_CheckErrorStatus(status,"SetDTR");
+}

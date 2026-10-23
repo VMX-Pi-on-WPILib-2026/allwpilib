@@ -251,6 +251,9 @@ class SerialPort {
    *
    * Empty the transmit and receive buffers in the device and formatted I/O.
    */
+  /** Sets the USB serial DTR line; false starts the original Studica LiDAR motor. */
+  void SetDTR(bool asserted);
+
   void Reset();
 
  private:

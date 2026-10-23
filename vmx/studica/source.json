@@ -1,0 +1,20 @@
+{
+  "apiVersion": "1.1.8",
+  "apiInputs": {
+    "Titan-cpp-1.1.8-headers.zip": "ac7beb8e57cf5fc2b8b7619ff6a92e74281930e4e83ce478b187f91ab30cef31",
+    "Titan-cpp-1.1.8-source.zip": "5ed0578fc0210cf2feeceef7fd417ad4871b0d355ff638dd47659922012cb546",
+    "Titan-java-1.1.8.jar": "c2c4a514b0c3833dda77f0c0d38e8cc224891745079c45edf24d260ae835b2a1",
+    "Titan-java-1.1.8-javadoc.jar": "c594f6d584f73b2df30dceefddc502f95c3fc14c551efa1b431baa663dc2d847",
+    "Titan-java-1.1.8-sources.jar": "d75033a86a700af9f31c8acec7c9ac89ef7204f428015dfa9a25fea633fbbbef"
+  },
+  "protocolReference": {
+    "repository": "Studica-Robotics/ROS2",
+    "ref": "f97edecac9175107b2b6cff841264fcaed912fb3",
+    "paths": [
+      "drivers/titan.cpp",
+      "drivers/titan.hpp",
+      "drivers/cobra.cpp",
+      "drivers/cobra.hpp"
+    ]
+  }
+}

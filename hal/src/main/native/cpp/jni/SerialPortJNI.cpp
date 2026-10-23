@@ -311,4 +311,12 @@ Java_edu_wpi_first_hal_SerialPortJNI_serialClose
   }
 }
 
+JNIEXPORT void JNICALL
+Java_edu_wpi_first_hal_SerialPortJNI_serialSetDTR
+  (JNIEnv* env, jclass, jint handle, jboolean asserted) {
+  int32_t status=0;
+  HAL_SetSerialDTR(handle,asserted,&status);
+  CheckStatusForceThrow(env,status);
+}
+
 }  // extern "C"

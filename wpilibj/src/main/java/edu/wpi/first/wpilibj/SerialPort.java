@@ -356,4 +356,13 @@ public class SerialPort implements AutoCloseable {
   public void reset() {
     SerialPortJNI.serialClear(m_portHandle);
   }
+
+  /**
+   * Sets the USB serial DTR line.
+   *
+   * @param asserted true to assert DTR; false starts the original Studica LiDAR motor
+   */
+  public void setDTR(boolean asserted) {
+    SerialPortJNI.serialSetDTR(m_portHandle, asserted);
+  }
 }

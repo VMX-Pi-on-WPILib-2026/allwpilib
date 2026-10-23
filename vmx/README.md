@@ -86,3 +86,10 @@ I2C device objects share the VMX bus. Address-only probes use a zero-length Linu
 I2C transfer on `/dev/i2c-1` (the bus used by the SDK); an SDK empty transaction
 would report success without sending an address. Bus/adapter errors return a
 failed transaction, including when the adapter cannot perform zero-length probes.
+
+## Studica 1.1.8 compatibility APIs
+
+The in-tree wpilibc and wpilibj include the original `studica::TitanQuad` /
+`com.studica.frc.TitanQuad` APIs and their encoder, Cobra, servo and LiDAR
+classes. See [Studica integration](studica/README.md) for build requirements,
+source compatibility, motor disable behavior, sensor models and host tests.

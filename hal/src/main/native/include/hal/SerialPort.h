@@ -256,6 +256,11 @@ void HAL_ClearSerial(HAL_SerialPortHandle handle, int32_t* status);
  *
  * @param[in] handle  the serial port handle to close
  */
+/** Sets the USB serial DTR modem line (used by Studica/YDLIDAR motor control).
+ * Returns a serial error when modem-line control is unavailable.
+ */
+void HAL_SetSerialDTR(HAL_SerialPortHandle handle, HAL_Bool asserted, int32_t* status);
+
 void HAL_CloseSerial(HAL_SerialPortHandle handle);
 #ifdef __cplusplus
 }  // extern "C"
