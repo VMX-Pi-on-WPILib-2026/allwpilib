@@ -99,14 +99,14 @@ new SerialPort Java code with an older HAL JNI, which lacks serialSetDTR.
 
 ```sh
 ./gradlew :wpilibc:publishToMavenLocal :wpilibj:publishToMavenLocal :hal:publishToMavenLocal \
-  -Ponlylinuxarm64 -PpublishVersion=2026.2.2-vmx.5 -PskipJavaFormat \
+  -Ponlylinuxarm64 -PpublishVersion=2026.2.2-vmx.6 -PskipJavaFormat \
   -Dmaven.repo.local="$HOME/wpilib/2026/vmx/maven"
 ```
 
 This builds artifacts locally. The matching published package is allwpilib
-`2026.2.2-vmx.5`; install it with VMX2026 extension 2.0.6 or later.
+`2026.2.2-vmx.6`; install it with VMX2026 extension 2.0.7 or later.
 A robot project must resolve the matching custom **wpilibc-cpp / wpilibj-java**
-and HAL artifacts, instead of the upstream 2026.2.2 WPILib artifacts. VMX2026 extension 2.0.6 recognizes the release manifest
+and HAL artifacts, instead of the upstream 2026.2.2 WPILib artifacts. VMX2026 extension 2.0.7 recognizes the release manifest
 `robotLibraries` capability and selects the matching custom wpilibc/wpilibj for
 VMX targets. Run `Update VMX2026 Version` after installing the extension.
 Remove the old Titan vendor dependency. RoboRIO targets keep upstream robot
@@ -116,7 +116,7 @@ For manual local builds without extension-managed dependencies, a project using
 the VMX GradleRIO fork can select the local artifacts explicitly in `build.gradle`:
 
 ```groovy
-def studicaVmxVersion = '2026.2.2-vmx.5' // matching custom build or release version
+def studicaVmxVersion = '2026.2.2-vmx.6' // matching custom build or release version
 wpi.versions.vmxHalVersion.set(studicaVmxVersion)
 configurations.configureEach {
     resolutionStrategy.eachDependency { dependency ->

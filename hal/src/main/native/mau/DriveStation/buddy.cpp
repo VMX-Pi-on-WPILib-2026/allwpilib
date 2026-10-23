@@ -20,8 +20,8 @@ BuddyPool::BuddyPool(size_t bytes)
     }
 
     Block &head = pool[0];
-    head.status = free;
-    head.k = m;
+    head.header.status = free;
+    head.header.k = m;
     InsertAfter(sentinel[m], head);
 }
 
@@ -31,6 +31,12 @@ BuddyPool::~BuddyPool(){
 
 void *BuddyPool::Acquire(size_t bytes){
     unsigned int kPrime = Log2Ceil(bytes + sizeof(Header));
+    // Every allocation is represented by a full Block object in the pool.
+    // Never split below that size, even when the requested payload is small.
+    const unsigned int minBlockLog2 = Log2Ceil(sizeof(Block));
+    if (kPrime < minBlockLog2) {
+        kPrime = minBlockLog2;
+    }
 
     unsigned int i = kPrime;
     while (i <= m && sentinel[i].link.next == &sentinel[i]) {
@@ -42,14 +48,14 @@ void *BuddyPool::Acquire(size_t bytes){
 
     Block &block = *sentinel[i].link.next;
     Unlink(block);
-    while (block.k > kPrime) {
-        block.k -= 1;
+    while (block.header.k > kPrime) {
+        block.header.k -= 1;
         Block &buddy = Buddy(block);
-        buddy.status = free;
-        buddy.k = block.k;
-        InsertAfter(sentinel[buddy.k], buddy);
+        buddy.header.status = free;
+        buddy.header.k = block.header.k;
+        InsertAfter(sentinel[buddy.header.k], buddy);
     }
-    block.status = reserved;
+    block.header.status = reserved;
     return block.userPart;
 }
 
@@ -61,15 +67,15 @@ void BuddyPool::Release(void *arg){
         return; // throw invalid_argument("invalid pointer");
     }
 
-    if (block.status != reserved) {
+    if (block.header.status != reserved) {
     	return;
     }
 
-    block.status = free;
+    block.header.status = free;
     Block *ptr;
-    for (ptr = &block; ptr->k < m; ptr->k += 1) {
+    for (ptr = &block; ptr->header.k < m; ptr->header.k += 1) {
         Block &buddy = Buddy(*ptr);
-        if (buddy.status == reserved || buddy.k != ptr->k) {
+        if (buddy.header.status == reserved || buddy.header.k != ptr->header.k) {
             break;
         }
         Unlink(buddy);
@@ -78,12 +84,18 @@ void BuddyPool::Release(void *arg){
         }
     }
 
-    InsertAfter(sentinel[ptr->k], *ptr);
+    InsertAfter(sentinel[ptr->header.k], *ptr);
 }
 
 BuddyPool::Block &BuddyPool::Buddy(Block &block) const{
-    uintptr_t addr = reinterpret_cast<uintptr_t>(&block) + (1 << block.k);
-    return *(reinterpret_cast<Block *>(addr));
+    // Buddy blocks are adjacent within each 2^k-byte region. Adding the block
+    // size only finds the buddy for a left-hand block; for a right-hand block
+    // it walks into the next region (and can leave the pool entirely). Toggle
+    // the k-th address bit relative to the pool base to find either side.
+    uintptr_t base = reinterpret_cast<uintptr_t>(pool);
+    uintptr_t offset = reinterpret_cast<uintptr_t>(&block) - base;
+    uintptr_t buddyOffset = offset ^ (uintptr_t{1} << block.header.k);
+    return *reinterpret_cast<Block *>(base + buddyOffset);
 }
 
 void BuddyPool::Unlink(Block &block){

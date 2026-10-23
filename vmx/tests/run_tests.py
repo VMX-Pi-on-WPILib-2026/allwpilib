@@ -35,3 +35,14 @@ with tempfile.TemporaryDirectory(prefix='vmx-hal-tests-') as work:
     subprocess.run(cmd, check=True, timeout=180)
     subprocess.run([binary], check=True, timeout=30,
                    env={**os.environ, 'UBSAN_OPTIONS': 'halt_on_error=1', 'ASAN_OPTIONS': 'detect_leaks=1'})
+
+    buddy_binary = str(Path(work) / 'buddy-regression')
+    buddy_cmd = [*shlex.split(os.environ.get('CXX', 'c++')), '-std=c++20', '-g', '-O1',
+                 '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
+                 '-I' + str(mau / 'DriveStation/include'),
+                 str(Path(__file__).with_name('buddy_pool_regression.cpp')),
+                 str(mau / 'DriveStation/buddy.cpp'), '-o', buddy_binary]
+    subprocess.run(buddy_cmd, check=True, timeout=60)
+    subprocess.run([buddy_binary], check=True, timeout=30,
+                   env={**os.environ, 'UBSAN_OPTIONS': 'halt_on_error=1', 'ASAN_OPTIONS': 'detect_leaks=1'})
+print('PASS BuddyPool: randomized split/merge allocation stress')

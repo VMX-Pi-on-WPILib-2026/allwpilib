@@ -49,7 +49,7 @@ JDK that runs Gradle 8.14 (17 or 21).
 2. Build the VMX HAL Maven repository used by the VMX GradleRIO fork:
 
    ```bash
-   python3 vmx/build_vmx_hal_maven.py --vmx-version 2026.2.2-vmx.5 --with-robot-libraries
+   python3 vmx/build_vmx_hal_maven.py --vmx-version 2026.2.2-vmx.6 --with-robot-libraries
    ```
 
    It builds `:hal` for linuxarm64 and writes `edu.wpi.first.hal:hal-cpp` / `hal-java`
