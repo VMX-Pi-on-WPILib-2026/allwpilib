@@ -82,7 +82,8 @@ CXX=g++ python3 vmx/tests/run_tests.py
 actual VMX HAL code with ASan/UBSan and replace SDK transport calls with fakes;
 no SDK binaries, Gradle, network or robot are needed. They cover malformed and
 fragmented DS packets, joystick input, I2C shared bus lifetime, SPI polarity,
-PWM scaling, ADC conversion and errors for unsupported features. Physical sensor,
+PWM scaling, ADC conversion, 2026 DIO handle translation and channel-map
+references/bounds/overrides, and errors for unsupported features. Physical sensor,
 watchdog and motor behavior still requires robot testing.
 
 I2C device objects share the VMX bus. Address-only probes use a zero-length Linux
@@ -103,3 +104,9 @@ source compatibility, motor disable behavior, sensor models and host tests.
 the existing VMX HAL, without an external navX vendordep or an additional SPI
 connection. See [VMX IMU](imu/README.md) for API units, shared lifetime, usage and
 host regression tests.
+
+VMX channel-map labels are bound to the current C++ HAL enum constants. Legacy
+`EnumValue` numbers in `ChannelMap.json` do not determine the current HAL ABI
+(in particular, DIO is 48 in WPILib 2026). Referenced channel groups are resolved
+after concrete groups, and missing/unsupported/out-of-range channels return an
+invalid channel for normal HAL error reporting rather than dereferencing null.

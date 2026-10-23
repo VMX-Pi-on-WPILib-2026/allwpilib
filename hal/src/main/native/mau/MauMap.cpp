@@ -3,7 +3,7 @@
 // ----- Mau Channel ----- //
 
 VMXChannelInfo Mau_Channel::getInfo() {
-    return VMXChannelInfo(vmxIndex, vmxAbility);
+    return unsupported ? VMXChannelInfo{} : VMXChannelInfo(vmxIndex, vmxAbility);
 }
 
 VMXResourceIndex Mau_Channel::getResourceIndex() {
@@ -12,21 +12,21 @@ VMXResourceIndex Mau_Channel::getResourceIndex() {
 
 // ----- Hal Channel Group ----- //
 
-Mau_ChannelGroup::Mau_ChannelGroup(Mau_Channel* newChannels) {
-    channels = newChannels;
-}
+Mau_ChannelGroup::Mau_ChannelGroup(Mau_Channel* newChannels, int size)
+    : channels(newChannels), count(size) {}
 
 Mau_Channel* Mau_ChannelGroup::getChannel(int index) {
+    if (!channels || index < 0 || index >= count || channels[index].unsupported) return nullptr;
     return &channels[index];
 }
 
 // ----- Hal Channel Group: w/WPI_Handle ----- //
 
-Mau_HandledGroup::Mau_HandledGroup(Mau_Channel* newChannels, int handle) : Mau_ChannelGroup(newChannels) {
+Mau_HandledGroup::Mau_HandledGroup(Mau_Channel* newChannels, int count, hal::HAL_HandleEnum handle) : Mau_ChannelGroup(newChannels, count) {
     WPI_Handle = (hal::HAL_HandleEnum) handle;
 }
 
-hal::HAL_HandleEnum Mau_HandledGroup::Mau_HandledGroup::getHandle() {
+hal::HAL_HandleEnum Mau_HandledGroup::getHandle() {
     return WPI_Handle;
 }
 
@@ -52,17 +52,20 @@ Mau_ChannelMap::Mau_ChannelMap() {
 // ----- Mau Map: Friend Creators ----- //
 
 void Mau_ChannelMap::setChannelAsReference(std::string target, std::string ref) {
-    groups[target] = groups[ref];
+    auto found = groups.find(ref);
+    groups[target] = found == groups.end() ? nullptr : found->second;
 }
 
-void Mau_ChannelMap::setGroup(std::string target, Mau_ChannelGroup* group) {
+void Mau_ChannelMap::setGroup(std::string target, std::shared_ptr<Mau_ChannelGroup> group) {
     groups[target] = group;
 }
 
 // ----- Mau Map: Getters ----- //
 
 Mau_Channel* Mau_ChannelMap::getChannel(std::string label, int index) {
-    return groups[label]->getChannel(index);
+    auto found = groups.find(label);
+    if (found == groups.end() || !found->second) return nullptr;
+    return found->second->getChannel(index);
 }
 
 VMXChannelInfo Mau_ChannelMap::getChannelInfo(std::string label, int index) {
@@ -70,7 +73,7 @@ VMXChannelInfo Mau_ChannelMap::getChannelInfo(std::string label, int index) {
     if (channel == nullptr) {
     	return VMXChannelInfo();
     } else {
-    	return VMXChannelInfo(channel->vmxIndex, channel->vmxAbility);
+        return channel->getInfo();
     }
 }
 
@@ -78,6 +81,7 @@ VMXChannelInfo Mau_ChannelMap::getChannelInfo(std::string label, int index) {
 
 void Mau_ChannelMap::initializeChannel(std::string label, int index, VMXChannelCapability ability, VMXResourceConfig* config) {
     Mau_Channel* channel = getChannel(label, index);
+    if (!channel) return;
     channel->vmxResConfig = config;
     channel->vmxAbility = ability;
 }

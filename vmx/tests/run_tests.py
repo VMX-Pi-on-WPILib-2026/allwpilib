@@ -36,6 +36,20 @@ with tempfile.TemporaryDirectory(prefix='vmx-hal-tests-') as work:
     subprocess.run([binary], check=True, timeout=30,
                    env={**os.environ, 'UBSAN_OPTIONS': 'halt_on_error=1', 'ASAN_OPTIONS': 'detect_leaks=1'})
 
+    channel_binary = str(Path(work) / 'channel-map-regression')
+    channel_cmd = [*shlex.split(os.environ.get('CXX', 'c++')), '-std=c++20', '-g', '-O1',
+                   '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
+                   *['-I' + str(p) for p in includes],
+                   '-I' + str(mau / 'Translator/include'),
+                   str(Path(__file__).with_name('channel_map_regression.cpp')),
+                   str(mau / 'MauMap.cpp'), str(mau / 'Translator/FileHandler.cpp'),
+                   str(mau / 'Translator/MauEnumConverter.cpp'), '-o', channel_binary]
+    subprocess.run(channel_cmd, check=True, timeout=120)
+    subprocess.run([channel_binary], check=True, timeout=30,
+                   cwd=work,
+                   env={**os.environ, 'UBSAN_OPTIONS': 'halt_on_error=1', 'ASAN_OPTIONS': 'detect_leaks=1'})
+    print('PASS ChannelMap: 2026 DIO handles, LED channels, references, bounds, overrides', flush=True)
+
     buddy_binary = str(Path(work) / 'buddy-regression')
     buddy_cmd = [*shlex.split(os.environ.get('CXX', 'c++')), '-std=c++20', '-g', '-O1',
                  '-fsanitize=address,undefined', '-fno-omit-frame-pointer',

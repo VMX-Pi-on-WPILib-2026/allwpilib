@@ -1,5 +1,9 @@
 #include "Translator/include/FileHandler.h"
 
+#include <memory>
+#include <stdexcept>
+#include <utility>
+
 // Location of VMX-pi override maps
 
 const constexpr char CHANNEL_MAP_JSON[] = "/usr/local/frc/third-party/lib/Maps/ChannelMap.json";
@@ -197,162 +201,112 @@ static constexpr char DEFAULT_CHANNEL_MAP_JSON[] = "\
 }\
 ";
 
-// EnumPairs JSON (this cannot be overridden)
-
-static constexpr char DEFAULT_ENUMPAIRS_JSON[] = "\
-{\
-	\"HAL_HandleEnum\": {\
-		\"0\":\"Undefined\",\
-		\"1\":\"DIO\",\
-		\"2\":\"Port\",\
-		\"3\":\"Notifier\",\
-		\"4\":\"Interrupt\",\
-		\"5\":\"AnalogOutput\",\
-		\"6\":\"AnalogInput\",\
-		\"7\":\"AnalogTrigger\",\
-		\"8\":\"Relay\",\
-		\"9\":\"PWM\",\
-		\"10\":\"DigitalPWM\",\
-		\"11\":\"Counter\",\
-		\"12\":\"FPGAEncoder\",\
-		\"13\":\"Encoder\",\
-		\"14\":\"Compressor\",\
-		\"15\":\"Solenoid\",\
-		\"16\":\"AnalogGyro\",\
-		\"17\":\"Vendor\",\
-		\"18\":\"SimulationJni\",\
-		\"19\":\"CAN\"\
-	},\
-\
-	\"VMXChannelType\": {\
-		\"0\":\"INVALID\",\
-		\"1\":\"FlexDIO\",\
-		\"2\":\"AnalogIn\",\
-		\"3\":\"HiCurrDIO\",\
-		\"4\":\"CommDIO\"\
-	},\
-\
-	\"VMXChannelCapability\": {\
-		\"0\":\"NoCapabilities\",\
-		\"1\":\"DigitalInput\",\
-		\"2\":\"DigitalOutput\",\
-		\"3\":\"PWMGeneratorOutput\",\
-		\"4\":\"PWMGeneratorOutput2\",\
-		\"5\":\"PWMCaptureInput\",\
-		\"6\":\"PWMCaptureInput2\",\
-		\"7\":\"EncoderAInput\",\
-		\"8\":\"EncoderBInput\",\
-		\"9\":\"AccumulatorInput\",\
-		\"10\":\"AnalogTriggerInput\",\
-		\"11\":\"InterruptInput\",\
-		\"12\":\"UART_TX\",\
-		\"13\":\"UART_RX\",\
-		\"14\":\"SPI_CLK\",\
-		\"15\":\"SPI_MISO\",\
-		\"16\":\"SPI_MOSI\",\
-		\"17\":\"SPI_CS\",\
-		\"18\":\"I2C_SDA\",\
-		\"19\":\"I2C_SCL\"\
-	}\
-}\
-";
-
 // -------- Generators -------- //
 
 Mau_Channel* Mau_FileHandler::genGroupChannels(Mau_ChannelMap* mauMap, const char* labelVal, rapidjson::Document* doc) {
-    bool allRef = (*doc)[labelVal]["Channels"].IsString();
-
-    if (allRef) {
-        std::string label(labelVal);
-        mauMap->setChannelAsReference(label, (*doc)[labelVal]["Channels"].GetString());
-        return nullptr;
-    } else {
-        int chanCount = (*doc)[labelVal]["Count"].GetInt();
-        Mau_Channel* newChannels = new Mau_Channel[chanCount];
-
-        int firstMXP = (*doc)[labelVal]["FirstMXP"].GetInt();
-        std::string ref = (*doc)[labelVal]["ReferenceTo"].GetString();
-        for (int count = 0; count < chanCount; count++) {
-            Mau_Channel curChannel;
-            curChannel.isMXP = (count >= firstMXP);
-
-            rapidjson::Value curVal(std::to_string(count).c_str(), doc->GetAllocator());
-
-            curChannel.wpiIndex = count;
-            int refIndex = (*doc)[labelVal]["Channels"][curVal].GetInt();
-
-
-            curChannel.unsupported = (refIndex == -1);
-
-            if (!curChannel.unsupported) {
-                if (ref == "VMXChannel") {
-                	curChannel.vmxIndex = refIndex;
-                }
-            }
-
-            newChannels[count] = curChannel;
-        }
-
-        return newChannels;
+    auto& group = (*doc)[labelVal];
+    if (!group.HasMember("Count") || !group["Count"].IsInt() ||
+        group["Count"].GetInt() <= 0 || group["Count"].GetInt() > 256 ||
+        !group.HasMember("FirstMXP") || !group["FirstMXP"].IsInt() ||
+        !group.HasMember("ReferenceTo") || !group["ReferenceTo"].IsString() ||
+        std::string(group["ReferenceTo"].GetString()) != "VMXChannel" ||
+        !group["Channels"].IsObject()) {
+        throw std::runtime_error(std::string("Invalid VMX channel group: ") + labelVal);
     }
+    int count = group["Count"].GetInt();
+    auto channels = std::make_unique<Mau_Channel[]>(count);
+    for (int index = 0; index < count; ++index) {
+        const std::string key = std::to_string(index);
+        if (!group["Channels"].HasMember(key.c_str()) ||
+            !group["Channels"][key.c_str()].IsInt()) {
+            throw std::runtime_error(std::string("Missing VMX channel: ") + labelVal + "/" + key);
+        }
+        int reference = group["Channels"][key.c_str()].GetInt();
+        if (reference < -1 || reference >= INVALID_VMX_CHANNEL_INDEX) {
+            throw std::runtime_error("Invalid VMX channel index");
+        }
+        auto& channel = channels[index];
+        channel.wpiIndex = index;
+        channel.isMXP = index >= group["FirstMXP"].GetInt();
+        channel.unsupported = reference == -1;
+        if (!channel.unsupported) channel.vmxIndex = reference;
+    }
+    return channels.release();
 }
 
-void Mau_FileHandler::genHandleGroup(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc) {
-    const char* labelVal = label.c_str();
-
-    int handle = (*doc)[labelVal]["EnumValue"].GetInt();
-
-    Mau_Channel* channels = genGroupChannels(mauMap, labelVal, doc);
-    Mau_HandledGroup* group = new Mau_HandledGroup(channels, handle);
-
-    mauMap->setGroup(label, group);
+void Mau_FileHandler::genHandleGroup(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums) {
+    auto& group = (*doc)[label.c_str()];
+    if (group["Channels"].IsString()) {
+        mauMap->setChannelAsReference(label, group["Channels"].GetString());
+        return;  // Do not replace the reference with a group containing null channels.
+    }
+    auto* channels = genGroupChannels(mauMap, label.c_str(), doc);
+    // JSON EnumValue belongs to the old image format, not the current HAL ABI.
+    // DIO is 48 in WPILib 2026, even when an override still contains EnumValue: 1.
+    mauMap->setGroup(label, std::make_shared<Mau_HandledGroup>(
+        channels, group["Count"].GetInt(), enums->getHandleValue(label)));
 }
 
-void Mau_FileHandler::genEncoderChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc) {
+void Mau_FileHandler::genEncoderChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums) {
     //Mau_Channel channel;
 }
 
-void Mau_FileHandler::genSPIChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc) {
+void Mau_FileHandler::genSPIChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums) {
     //Mau_Channel channel;
 }
 
-void Mau_FileHandler::genI2CChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc) {
+void Mau_FileHandler::genI2CChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums) {
     //Mau_Channel channel;
 }
 
-void Mau_FileHandler::genSerialChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc) {
+void Mau_FileHandler::genSerialChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums) {
     //Mau_Channel channel;
 }
 
 // -------- Readers -------- //
 
-Mau_EnumConverter* Mau_FileHandler::Mau_FileHandler::readEnums() {
-    Mau_EnumConverter* enums = new Mau_EnumConverter();
-    rapidjson::Document vmxDoc;
-    // Initialize with default memory contents
-    rapidjson::MemoryStream vmxMemStream(DEFAULT_ENUMPAIRS_JSON, strlen(DEFAULT_ENUMPAIRS_JSON));
-    vmxDoc.ParseStream(vmxMemStream);
-    assert(vmxDoc.IsObject());
-
-    for(int handleCount = 0; handleCount < 20; handleCount++) {
-        // Keep the key string alive while RapidJSON looks it up. Taking c_str()
-        // directly from the temporary std::string leaves a dangling pointer.
-        const std::string value = std::to_string(handleCount);
-        std::string label = vmxDoc["HAL_HandleEnum"][value.c_str()].GetString();
-        hal::HAL_HandleEnum handle = (hal::HAL_HandleEnum) handleCount;
-        enums->setHandlePair(label, handle);
-    }
-    return enums;
+Mau_EnumConverter* Mau_FileHandler::readEnums() {
+    auto* converter = new Mau_EnumConverter();
+    // Bind labels to C++ enum constants; never duplicate enum values in JSON.
+    converter->setHandlePair("Undefined", hal::HAL_HandleEnum::Undefined);
+    converter->setHandlePair("DIO", hal::HAL_HandleEnum::DIO);
+    converter->setHandlePair("Port", hal::HAL_HandleEnum::Port);
+    converter->setHandlePair("Notifier", hal::HAL_HandleEnum::Notifier);
+    converter->setHandlePair("Interrupt", hal::HAL_HandleEnum::Interrupt);
+    converter->setHandlePair("AnalogOutput", hal::HAL_HandleEnum::AnalogOutput);
+    converter->setHandlePair("AnalogInput", hal::HAL_HandleEnum::AnalogInput);
+    converter->setHandlePair("AnalogTrigger", hal::HAL_HandleEnum::AnalogTrigger);
+    converter->setHandlePair("Relay", hal::HAL_HandleEnum::Relay);
+    converter->setHandlePair("PWM", hal::HAL_HandleEnum::PWM);
+    converter->setHandlePair("DigitalPWM", hal::HAL_HandleEnum::DigitalPWM);
+    converter->setHandlePair("Counter", hal::HAL_HandleEnum::Counter);
+    converter->setHandlePair("FPGAEncoder", hal::HAL_HandleEnum::FPGAEncoder);
+    converter->setHandlePair("Encoder", hal::HAL_HandleEnum::Encoder);
+    converter->setHandlePair("Compressor", hal::HAL_HandleEnum::Compressor);
+    converter->setHandlePair("Solenoid", hal::HAL_HandleEnum::Solenoid);
+    converter->setHandlePair("AnalogGyro", hal::HAL_HandleEnum::AnalogGyro);
+    converter->setHandlePair("Vendor", hal::HAL_HandleEnum::Vendor);
+    converter->setHandlePair("SimulationJni", hal::HAL_HandleEnum::SimulationJni);
+    converter->setHandlePair("CAN", hal::HAL_HandleEnum::CAN);
+    converter->setHandlePair("SerialPort", hal::HAL_HandleEnum::SerialPort);
+    converter->setHandlePair("DutyCycle", hal::HAL_HandleEnum::DutyCycle);
+    converter->setHandlePair("DMA", hal::HAL_HandleEnum::DMA);
+    converter->setHandlePair("AddressableLED", hal::HAL_HandleEnum::AddressableLED);
+    converter->setHandlePair("CTREPCM", hal::HAL_HandleEnum::CTREPCM);
+    converter->setHandlePair("CTREPDP", hal::HAL_HandleEnum::CTREPDP);
+    converter->setHandlePair("REVPDH", hal::HAL_HandleEnum::REVPDH);
+    converter->setHandlePair("REVPH", hal::HAL_HandleEnum::REVPH);
+    return converter;
 }
 
 Mau_EnumConverter* Mau_FileHandler::getEnumConverter() {
     return enums;
 }
 
-Mau_ChannelMap* Mau_FileHandler::readChannelMap() {
-	Mau_ChannelMap* channelMap = new Mau_ChannelMap();    
+Mau_ChannelMap* Mau_FileHandler::readChannelMap(const char* overridePath) {
+    auto channelMap = std::make_unique<Mau_ChannelMap>();
     rapidjson::Document mauDoc;
-    FILE* mauJson = fopen(CHANNEL_MAP_JSON, "r");
+    FILE* mauJson = fopen(overridePath ? overridePath : CHANNEL_MAP_JSON, "r");
     if (mauJson) {
         char readBuffer[65536];
         rapidjson::FileReadStream vmxStream(mauJson, readBuffer, sizeof(readBuffer));
@@ -363,16 +317,24 @@ Mau_ChannelMap* Mau_FileHandler::readChannelMap() {
         rapidjson::MemoryStream vmxMemStream(DEFAULT_CHANNEL_MAP_JSON, strlen(DEFAULT_CHANNEL_MAP_JSON));
         mauDoc.ParseStream(vmxMemStream);
     }
-    assert(mauDoc.IsObject());
-
-    for (auto it = allGenerators.begin(); it != allGenerators.end(); ++it) {
-        rapidjson::Value label(it->first.c_str(), mauDoc.GetAllocator());
-
-        genFuncs creator = allGenerators.at(it->first);
-        creator(channelMap, it->first, &mauDoc);
+    if (mauDoc.HasParseError() || !mauDoc.IsObject()) {
+        throw std::runtime_error("Invalid VMX ChannelMap.json");
     }
-
-    return channelMap;
+    // Referenced groups (Counter/DigitalPWM -> DIO, Relay -> PWM, etc.) must be
+    // bound only after all concrete groups exist; generator keys are sorted.
+    for (int pass = 0; pass < 2; ++pass) {
+        for (const auto& [label, creator] : allGenerators) {
+            if (creator != &genHandleGroup) continue;  // Dedicated SDK paths handle the others.
+            if (!mauDoc.HasMember(label.c_str())) continue;
+            const auto& group = mauDoc[label.c_str()];
+            if (!group.IsObject() || !group.HasMember("Channels")) {
+                throw std::runtime_error("Invalid VMX channel group: " + label);
+            }
+            if (group["Channels"].IsString() != (pass == 1)) continue;
+            creator(channelMap.get(), label, &mauDoc, enums);
+        }
+    }
+    return channelMap.release();
 }
 
 Mau_FileHandler::Mau_FileHandler() {

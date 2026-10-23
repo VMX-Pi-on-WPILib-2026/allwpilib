@@ -19,15 +19,15 @@ class Mau_FileHandler {
     Mau_EnumConverter* enums;
 
     static Mau_Channel* genGroupChannels(Mau_ChannelMap* mauMap, const char* labelVal, rapidjson::Document* doc);
-    static void genHandleGroup(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc);
-    static void genEncoderChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc);
-    static void genSPIChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc);
-    static void genI2CChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc);
-    static void genSerialChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc);
+    static void genHandleGroup(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums);
+    static void genEncoderChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums);
+    static void genSPIChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums);
+    static void genI2CChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums);
+    static void genSerialChannel(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums);
 
     Mau_EnumConverter* readEnums();
 
-    typedef void(* genFuncs)(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc);
+    typedef void(* genFuncs)(Mau_ChannelMap* mauMap, std::string label, rapidjson::Document* doc, Mau_EnumConverter* enums);
     const std::map<std::string, genFuncs> allGenerators = {
         {"DIO", &genHandleGroup},
         {"Interrupt", &genHandleGroup},
@@ -46,7 +46,7 @@ class Mau_FileHandler {
     };
 
 public:
-    Mau_ChannelMap* readChannelMap();
+    Mau_ChannelMap* readChannelMap(const char* overridePath = nullptr);
     Mau_EnumConverter* getEnumConverter();
     Mau_FileHandler();
     ~Mau_FileHandler();

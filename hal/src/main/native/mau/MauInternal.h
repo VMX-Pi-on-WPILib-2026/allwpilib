@@ -29,11 +29,13 @@ namespace mau {
     extern bool vmxIOActive;
 
     inline VMXChannelInfo GetChannelInfo(hal::HAL_HandleEnum hal_handle_type, int channel_index) {
+        if (!channelMap || !enumConverter || !vmxIO) return VMXChannelInfo{};
     	VMXChannelInfo chan_info =
     			channelMap->getChannelInfo(enumConverter->getHandleLabel(hal_handle_type), channel_index);
+        if (!chan_info.IsValid()) return chan_info;
     	// Update capabilities provided by underlying VMX-pi HAL
     	VMXChannelType chan_type;
-    	vmxIO->GetChannelCapabilities(chan_info.index, chan_type, chan_info.capabilities);
+        if (!vmxIO->GetChannelCapabilities(chan_info.index, chan_type, chan_info.capabilities)) return VMXChannelInfo{};
     	return chan_info;
     }
     
